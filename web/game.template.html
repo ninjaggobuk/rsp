@@ -267,10 +267,10 @@ select{
 
         <fieldset>
           <legend>아이템 분배 (원정대 / 쉐도우)</legend>
-          <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="1"> / <input type="number" id="iReS" min="0" max="5" value="1"></span></label>
+          <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="0"> / <input type="number" id="iReS" min="0" max="5" value="0"></span></label>
           <label>무조건승리 <span><input type="number" id="iWinE" min="0" max="5" value="0"> / <input type="number" id="iWinS" min="0" max="5" value="0"></span></label>
           <label>스킵·직진 <span><input type="number" id="iSkE" min="0" max="5" value="0"> / <input type="number" id="iSkS" min="0" max="5" value="0"></span></label>
-          <p class="note">기본값은 시뮬레이션 권고안 — 공릉 24개 루트 중앙값 49.7%.</p>
+          <p class="note">기본값은 <b>아이템 없음</b>입니다. 공릉 일대 임의 루트 24개에서 중앙값 <b>52.5%</b>, 루트의 79%가 40~60% 구간에 들어옵니다 — 지금까지 시험한 구성 중 가장 균형 잡혔습니다. 아이템을 넣으면 원정대 쪽으로 기웁니다.</p>
         </fieldset>
 
         <fieldset>
@@ -434,28 +434,34 @@ EDGES.forEach(function(e){
     if (!(k in stateIdx)){ stateIdx[k] = stateList.length; stateList.push(p); }
   });
 });
-/* 갈림길에서 고를 수 있는 '방향'.
+/* 갈림길에서 고를 수 있는 '방향'들. 각 방향은 그 방향의 길 묶음이다.
+
    OSM 엣지를 그대로 세면 안 된다 — 교차로 병합 때문에 역 일대가 한 점이 되면서
-   엣지가 34개까지 붙는데(2026-09-17 실측), 실제로는 동/서/남/북 + 골목 몇 개다.
-   사장님 규칙도 "직진 횡단보도 1, 우측 횡단보도 1, 좌측 보도 1 = 3갈래"처럼
-   방향으로 센다. 방위각 25도 안은 한 묶음으로 보고 그 중 가장 짧은 길을
-   대표로 쓴다. 파이썬 모델(solve_items.options)과 같은 규칙이다. */
+   엣지가 34개까지 붙는데, 실제로는 동/서/남/북 + 골목 몇 개다. 사장님 규칙도
+   "직진 횡단보도 1, 우측 횡단보도 1, 좌측 보도 1 = 3갈래"처럼 방향으로 센다.
+
+   ★ 대표를 미리 하나 고르면 안 된다. '가장 짧은 길'로 골랐더니 5 m 횡단보도
+     토막이 진짜 도로를 밀어냈고, 목적지로 가는 길이 사라져 도착 확률 0% 인
+     루트가 생겼다(2026-09-17 실측). 묶음을 그대로 두고, 값은 '그 방향으로 가면
+     자연히 택할 최선'(묶음 안 최솟값)으로 친다. 양 팀이 같은 값을 보므로
+     공평하고, 목적지로 가는 길이 든 묶음은 값이 낮아 반드시 살아남는다.
+     양 팀 모두 **방향만** 정한다(사장님 확정). 파이썬 모델과 같은 규칙이다. */
 var BEARING_BUCKET = 25.0;
 
-function optionsOf(prev, cur){
+function optionGroups(prev, cur){
   var o = [];
   for (var i = 0; i < adj[cur].length; i++){
     var v = adj[cur][i].v;
     if (v !== prev) o.push(v);
   }
-  if (!o.length) return prev !== null ? [prev] : [];   // 막다른 길 -> 되돌아 나온다
-  if (o.length <= 2) return o;
+  if (!o.length) return prev !== null ? [[prev]] : [];
+  if (o.length <= 2) return o.map(function(w){ return [w]; });
 
   var items = o.map(function(w){
     var a = Math.atan2(NODES[w].y - NODES[cur].y, NODES[w].x - NODES[cur].x)
             * 180 / Math.PI;
     if (a < 0) a += 360;
-    return {a: a, w: edgeW(cur, w), v: w};
+    return {a: a, v: w};
   }).sort(function(p1, p2){ return p1.a - p2.a; });
 
   var groups = [], g = [items[0]];
@@ -464,17 +470,35 @@ function optionsOf(prev, cur){
     else { groups.push(g); g = [items[k]]; }
   }
   groups.push(g);
-  /* 0도 경계를 사이에 둔 두 묶음은 하나다 */
   if (groups.length > 1 &&
       (360 - groups[groups.length-1][groups[groups.length-1].length-1].a)
         + groups[0][0].a <= BEARING_BUCKET){
     groups[0] = groups[groups.length-1].concat(groups[0]);
     groups.pop();
   }
-  return groups.map(function(gr){
-    return gr.reduce(function(m, x){ return x.w < m.w ? x : m; }).v;
-  });
+  return groups.map(function(gr){ return gr.map(function(x){ return x.v; }); });
 }
+
+/* 그 방향으로 갈 때 자연히 택하는 길 = 묶음 안에서 남은 시간이 최소인 길 */
+function groupPick(V, cur, group){
+  var best = group[0], bv = Infinity;
+  for (var i = 0; i < group.length; i++){
+    var w = group[i];
+    var v = edgeW(cur, w) + V[stateIdx[cur + ">" + w]];
+    if (v < bv){ bv = v; best = w; }
+  }
+  return {w: best, v: bv};
+}
+
+/* 화면/이동용 대표 목록 (가치함수 기준) */
+function optionsOf(prev, cur, V){
+  var grs = optionGroups(prev, cur);
+  if (!V) return grs.map(function(g){
+    return g.reduce(function(m, w){ return edgeW(cur, w) < edgeW(cur, m) ? w : m; });
+  });
+  return grs.map(function(g){ return groupPick(V, cur, g).w; });
+}
+
 function solveV(goal, pExp, tRps){
   var V = new Float64Array(stateList.length);
   for (var sweep = 0; sweep < 4000; sweep++){
@@ -482,15 +506,14 @@ function solveV(goal, pExp, tRps){
     for (var s = 0; s < stateList.length; s++){
       var prev = stateList[s][0], cur = stateList[s][1];
       if (cur === goal) continue;
-      var opts = optionsOf(prev, cur);
+      var grs = optionGroups(prev, cur);
       var mn = Infinity, mx = -Infinity;
-      for (var i = 0; i < opts.length; i++){
-        var w = opts[i];
-        var val = edgeW(cur, w) + V[stateIdx[cur + ">" + w]];
+      for (var i = 0; i < grs.length; i++){
+        var val = groupPick(V, cur, grs[i]).v;
         if (val < mn) mn = val;
         if (val > mx) mx = val;
       }
-      var nv = (opts.length >= 2) ? tRps + pExp*mn + (1-pExp)*mx : mn;
+      var nv = (grs.length >= 2) ? tRps + pExp*mn + (1-pExp)*mx : mn;
       var d = Math.abs(nv - V[s]);
       if (d > delta) delta = d;
       V[s] = nv;
@@ -1597,7 +1620,7 @@ function valOf(cur, w){ return edgeW(cur,w) + G.V[stateIdx[cur + ">" + w]]; }
 function step(){
   if (G.cur === G.goal){ finish(true); return; }
   if (G.t > G.limit){ finish(false); return; }
-  var opts = optionsOf(G.prev, G.cur);
+  var opts = optionsOf(G.prev, G.cur, G.V);
   if (!opts.length){ finish(false); return; }
   if (opts.length === 1){ move(opts[0], "외길"); return; }
 
@@ -1915,6 +1938,6 @@ $("extBtn").onclick = function(){
 initMap();
 $("searchBtn").onclick = searchPlace;
 $("q").addEventListener("keydown", function(e){ if (e.key === "Enter") searchPlace(); });
-setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 재도전권 1:1 은 공릉 24개 루트에서 중앙값 49.7%가 나온 구성입니다.</p>');
+setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 아이템 없음이 공릉 24개 루트에서 중앙값 52.5%로 가장 균형 잡힌 구성입니다.</p>');
 })();
 </script>

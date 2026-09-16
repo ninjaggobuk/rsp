@@ -96,29 +96,32 @@ BEARING_BUCKET = 25.0     # 이 각도 안이면 '같은 방향'으로 본다
 POS = None                # 현재 그래프의 노드 좌표 (build 계열이 채운다)
 
 
-def options(S, prev, cur):
-    """갈림길에서 고를 수 있는 '방향' 목록.
+def option_groups(S, prev, cur):
+    """갈림길에서 고를 수 있는 '방향'들. 각 방향은 그 방향의 길 묶음이다.
 
     ★ OSM 엣지를 그대로 세면 안 된다. 교차로 병합 때문에 역 일대가 한 점이
       되면서 엣지가 34개까지 붙는데(2026-09-17 실측), 실제로는 동/서/남/북 +
-      골목 몇 개일 뿐이다. 사장님 규칙도 "직진 횡단보도 1, 우측 횡단보도 1,
-      좌측 보도 1 = 3갈래"처럼 **방향**으로 센다.
+      골목 몇 개다. 사장님 규칙도 "직진 횡단보도 1, 우측 횡단보도 1, 좌측 보도
+      1 = 3갈래"처럼 **방향**으로 센다.
 
-    그래서 방위각 BEARING_BUCKET 안에 있는 길들을 한 묶음으로 보고, 각 묶음에서
-    **가장 짧은 길**을 대표로 내보낸다(그 방향으로 가는 가장 직접적인 길).
-    25도로 묶으면 최대 8갈래가 되고 9갈래 이상은 사라진다.
+    ★ 대표를 미리 하나 고르면 안 된다. '가장 짧은 길'로 골랐더니 5 m 짜리
+      횡단보도 토막이 80 m 진짜 도로를 밀어냈고, 목적지로 가는 길이 선택지에서
+      사라져 **도착 확률 0%** 인 루트가 생겼다(2026-09-17 실측).
+      그래서 묶음을 그대로 돌려주고, 값은 '그 방향으로 가면 자연히 택할 최선'
+      (묶음 안 최솟값)으로 친다. 양 팀이 같은 값을 보므로 공평하고, 목적지로
+      가는 길이 들어 있는 묶음은 값이 낮아 반드시 살아남는다.
     """
     opts = [w for w in S[cur] if w != prev]
     if not opts:
-        return [prev] if prev is not None else []
+        return [[prev]] if prev is not None else []
     if POS is None or len(opts) <= 2:
-        return opts
+        return [[w] for w in opts]
 
     items = []
     for w in opts:
-        a = math.degrees(math.atan2(POS[w][1] - POS[cur][1],
-                                    POS[w][0] - POS[cur][0])) % 360.0
-        items.append((a, S[cur][w]["w"], w))
+        ang = math.degrees(math.atan2(POS[w][1] - POS[cur][1],
+                                      POS[w][0] - POS[cur][0])) % 360.0
+        items.append((ang, w))
     items.sort()
 
     groups, g = [], [items[0]]
@@ -128,12 +131,26 @@ def options(S, prev, cur):
         else:
             groups.append(g); g = [it]
     groups.append(g)
-    # 0도 경계를 사이에 둔 두 묶음은 하나다
     if len(groups) > 1 and (360.0 - groups[-1][-1][0]) + groups[0][0][0] <= BEARING_BUCKET:
         groups[0] = groups[-1] + groups[0]
         groups.pop()
 
-    return [min(gr, key=lambda t: t[1])[2] for gr in groups]
+    return [[w for _a, w in gr] for gr in groups]
+
+
+def group_pick(S, V, cur, group):
+    """그 방향으로 갈 때 자연히 택하는 길 = 묶음 안에서 남은 시간이 최소인 길."""
+    best, bv = group[0], float("inf")
+    for w in group:
+        v = S[cur][w]["w"] + V[(cur, w)]
+        if v < bv:
+            bv, best = v, w
+    return best, bv
+
+
+def options(S, prev, cur):
+    """묶음별 대표 하나씩 (V 를 모를 때 쓰는 근사 — 가장 짧은 길)."""
+    return [min(gr, key=lambda w: S[cur][w]["w"]) for gr in option_groups(S, prev, cur)]
 
 
 def solve(S, goal, t_rps=T_RPS_NOM, p_shadow=P_SHADOW):
@@ -144,10 +161,10 @@ def solve(S, goal, t_rps=T_RPS_NOM, p_shadow=P_SHADOW):
         for (prev, cur) in states:
             if cur == goal:
                 continue
-            opts = options(S, prev, cur)
-            vals = [S[cur][w]["w"] + V[(cur, w)] for w in opts]
+            grs = option_groups(S, prev, cur)
+            vals = [group_pick(S, V, cur, gr)[1] for gr in grs]
             new = (t_rps + (1 - p_shadow) * min(vals) + p_shadow * max(vals)
-                   if len(opts) >= 2 else vals[0])
+                   if len(grs) >= 2 else vals[0])
             delta = max(delta, abs(new - V[(prev, cur)]))
             V[(prev, cur)] = new
         if delta < TOL_VI:
@@ -178,16 +195,18 @@ def play(S, pos, V, start, goal, rng, exp, sha, theta,
     n_r = n_exp + n_sha
 
     while cur != goal and t < TIME_CAP:
-        opts = options(S, prev, cur)
-        if not opts:
+        grs = option_groups(S, prev, cur)
+        if not grs:
             break
-        if len(opts) == 1:
-            nxt = opts[0]
+        if len(grs) == 1:
+            nxt = group_pick(S, V, cur, grs[0])[0]
             t += S[cur][nxt]["w"]
             prev, cur = cur, nxt
             continue
 
-        vals = [(S[cur][w]["w"] + V[(cur, w)], w) for w in opts]
+        picked = [group_pick(S, V, cur, gr) for gr in grs]
+        vals = [(v, w) for w, v in picked]
+        opts = [w for w, _v in picked]
         best, worst = min(vals), max(vals)
         d = worst[0] - best[0]
 
