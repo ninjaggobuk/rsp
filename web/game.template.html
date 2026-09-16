@@ -164,6 +164,33 @@ select{
     </div>
 
     <div>
+      <div class="panel" id="setupPanel"><div class="pad">
+        <h2>설정</h2>
+        <fieldset>
+          <legend>인원</legend>
+          <label>원정대 <input type="number" id="nExp" min="1" max="8" value="4"></label>
+          <label>쉐도우 <input type="number" id="nSha" min="1" max="4" value="2"></label>
+          <label>내 팀
+            <select id="myTeam">
+              <option value="exp">원정대</option>
+              <option value="sha">쉐도우</option>
+            </select>
+          </label>
+          <p class="note">쉐도우가 3명 이상이면 서로 다른 기호로 갈라 내서 무승부를 무한히 만들 수 있습니다. 2명까지를 권합니다.</p>
+        </fieldset>
+        <fieldset>
+          <legend>아이템 (원정대 / 쉐도우)</legend>
+          <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="1"> / <input type="number" id="iReS" min="0" max="5" value="1"></span></label>
+          <label>무조건승리 <span><input type="number" id="iWinE" min="0" max="5" value="0"> / <input type="number" id="iWinS" min="0" max="5" value="0"></span></label>
+          <label>스킵·직진 <span><input type="number" id="iSkE" min="0" max="5" value="0"> / <input type="number" id="iSkS" min="0" max="5" value="0"></span></label>
+          <p class="note">기본값은 시뮬레이션 권고안입니다 — 공릉 24개 루트 중앙값 49.7%.</p>
+        </fieldset>
+        <div class="btnrow">
+          <button class="primary" id="startBtn">지점 고르기</button>
+          <button class="ghost" id="randBtn">무작위 배치</button>
+        </div>
+      </div></div>
+
       <div class="panel"><div class="pad">
         <div class="limitline">
           <div class="clock" id="clock">00:00</div>
@@ -205,33 +232,6 @@ select{
         <div class="rows" id="careerRows"></div>
         <div class="btnrow" style="margin-top:10px">
           <button class="ghost" id="resetCareer">기록 지우기</button>
-        </div>
-      </div></div>
-
-      <div class="panel" id="setupPanel"><div class="pad">
-        <h2>설정</h2>
-        <fieldset>
-          <legend>인원</legend>
-          <label>원정대 <input type="number" id="nExp" min="1" max="8" value="4"></label>
-          <label>쉐도우 <input type="number" id="nSha" min="1" max="4" value="2"></label>
-          <label>내 팀
-            <select id="myTeam">
-              <option value="exp">원정대</option>
-              <option value="sha">쉐도우</option>
-            </select>
-          </label>
-          <p class="note">쉐도우가 3명 이상이면 서로 다른 기호로 갈라 내서 무승부를 무한히 만들 수 있습니다. 2명까지를 권합니다.</p>
-        </fieldset>
-        <fieldset>
-          <legend>아이템 (원정대 / 쉐도우)</legend>
-          <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="1"> / <input type="number" id="iReS" min="0" max="5" value="1"></span></label>
-          <label>무조건승리 <span><input type="number" id="iWinE" min="0" max="5" value="0"> / <input type="number" id="iWinS" min="0" max="5" value="0"></span></label>
-          <label>스킵·직진 <span><input type="number" id="iSkE" min="0" max="5" value="0"> / <input type="number" id="iSkS" min="0" max="5" value="0"></span></label>
-          <p class="note">기본값은 시뮬레이션 권고안입니다 — 공릉 24개 루트 중앙값 49.7%.</p>
-        </fieldset>
-        <div class="btnrow">
-          <button class="primary" id="startBtn">지점 고르기</button>
-          <button class="ghost" id="randBtn">무작위 배치</button>
         </div>
       </div></div>
 
@@ -389,7 +389,7 @@ function draw(){
   cx.fillStyle = surf; cx.fillRect(0,0,cv.width,cv.height);
 
   var k = cv.width / (view.x1 - view.x0);
-  cx.lineWidth = Math.max(0.6, 1.1 * k * 8);
+  cx.lineWidth = Math.max(0.9, 1.6 * k * 8);
   cx.strokeStyle = road; cx.lineCap = "round";
   cx.beginPath();
   for (var i = 0; i < EDGES.length; i++){
