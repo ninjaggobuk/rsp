@@ -679,17 +679,8 @@ function pickRandom(){
   onPick(b);
 }
 
-cv.addEventListener("click", function(ev){
-  if (!G) return;
-  var r = cv.getBoundingClientRect();
-  var dpr = cv.width / r.width;
-  var mx = (ev.clientX - r.left) * dpr, my = (ev.clientY - r.top) * dpr;
-  if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(nearestNode(mx,my));
-  else if (G.phase === "chooseDir" && G.pend){
-    var n = nearestNode(mx,my);
-    if (G.pend.opts.indexOf(n) >= 0) chooseDir(n);
-  }
-});
+/* 지도 클릭은 Leaflet 쪽(initMap 의 MAP.on("click"))에서 받는다.
+   방향 선택은 갈림길 번호 마커를 직접 누른다. */
 
 function onPick(n){
   if (G.phase === "pickStart"){

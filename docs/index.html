@@ -1,3 +1,9 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="공릉 실제 보행망 위에서 하는 원정대 대 쉐도우 추격 게임.">
 <title>가위바위보 원정대</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -163,7 +169,8 @@ select{
 .hidden{display:none !important}
 @media (prefers-reduced-motion:reduce){ *{transition:none !important} }
 </style>
-
+</head>
+<body>
 <div class="wrap">
   <header>
     <h1>가위바위보 원정대</h1>
@@ -679,17 +686,8 @@ function pickRandom(){
   onPick(b);
 }
 
-cv.addEventListener("click", function(ev){
-  if (!G) return;
-  var r = cv.getBoundingClientRect();
-  var dpr = cv.width / r.width;
-  var mx = (ev.clientX - r.left) * dpr, my = (ev.clientY - r.top) * dpr;
-  if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(nearestNode(mx,my));
-  else if (G.phase === "chooseDir" && G.pend){
-    var n = nearestNode(mx,my);
-    if (G.pend.opts.indexOf(n) >= 0) chooseDir(n);
-  }
-});
+/* 지도 클릭은 Leaflet 쪽(initMap 의 MAP.on("click"))에서 받는다.
+   방향 선택은 갈림길 번호 마커를 직접 누른다. */
 
 function onPick(n){
   if (G.phase === "pickStart"){
@@ -1001,3 +999,5 @@ $("q").addEventListener("keydown", function(e){ if (e.key === "Enter") searchPla
 setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 재도전권 1:1 은 공릉 24개 루트에서 중앙값 49.7%가 나온 구성입니다.</p>');
 })();
 </script>
+</body>
+</html>

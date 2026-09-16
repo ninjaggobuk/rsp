@@ -40,10 +40,33 @@ def main():
     if "</script" in mj.lower():
         raise SystemExit("지도 JSON 안에 script 종료 태그가 있다")
 
-    html = tpl.replace("__MAP_JSON__", mj)
-    for out in OUTS:
+    # 템플릿에 남은 옛 캔버스 시절 식별자 — 있으면 런타임에 터진다
+    for dead in ("sizeCanvas", "getContext", "cv.", "nearestNode("):
+        if dead in tpl:
+            raise SystemExit("템플릿에 죽은 참조가 남아 있다: %s" % dead)
+
+    body = tpl.replace("__MAP_JSON__", mj)
+
+    # 아트팩트는 게시 시 doctype/head/body 를 씌워주지만 GitHub Pages 는 파일을
+    # 그대로 서빙한다. 껍데기가 없으면 quirks 모드로 뜬다.
+    # 템플릿은 <head> 성격(title/link/style) 다음에 <div class="wrap"> 로 본문이
+    # 시작하므로 거기서 자른다.
+    split = '<div class="wrap">'
+    if split not in body:
+        raise SystemExit("본문 시작점(%s)을 못 찾았다" % split)
+    i = body.index(split)
+    head, rest = body[:i], body[i:]
+    page = ('<!doctype html>\n<html lang="ko">\n<head>\n'
+            '<meta charset="utf-8">\n'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            '<meta name="description" content="공릉 실제 보행망 위에서 하는 '
+            '원정대 대 쉐도우 추격 게임.">\n'
+            + head.strip() + '\n</head>\n<body>\n'
+            + rest.strip() + '\n</body>\n</html>\n')
+
+    for out, content in ((OUTS[0], body), (OUTS[1], page)):
         os.makedirs(os.path.dirname(out), exist_ok=True)
-        io.open(out, "w", encoding="utf-8").write(html)
+        io.open(out, "w", encoding="utf-8").write(content)
         print("  %-24s %6.0f KB" % (os.path.relpath(out, ROOT),
                                     os.path.getsize(out) / 1024.0))
 
