@@ -1301,7 +1301,13 @@ function fbConnect(){
   }, Promise.resolve())
   .then(function(){
     firebase.initializeApp(window.RSP_CONFIG.firebase);
-    return firebase.auth().signInAnonymously();
+    /* 기본(LOCAL) 저장소는 브라우저 단위라, 같은 브라우저의 두 탭이 같은 익명
+       계정을 공유해 서로를 덮어쓴다(2026-09-17 실측: 두 번째 탭이 방장을
+       지웠다). SESSION 은 탭 단위이고 새로고침에는 살아남아서, 탭 하나 =
+       참가자 하나가 된다. */
+    return firebase.auth()
+      .setPersistence(firebase.auth.Auth.Persistence.SESSION)
+      .then(function(){ return firebase.auth().signInAnonymously(); });
   })
   .then(function(c){
     FB.uid = c.user.uid;
