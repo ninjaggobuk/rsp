@@ -241,7 +241,15 @@ select{
 
     <div>
       <div class="panel" id="setupPanel"><div class="pad">
-        <h2>로비 <span class="mine" id="hostTag">방장: 나</span></h2>
+        <h2>로비 <span class="mine" id="roomCode"></span></h2>
+        <div class="searchbar" style="margin-bottom:10px">
+          <button class="primary" id="mkRoom">방 만들기</button>
+          <input type="text" id="roomIn" maxlength="4" placeholder="코드" style="flex:0 0 78px;
+            text-transform:uppercase; font-family:'IBM Plex Mono',monospace; text-align:center;
+            font:inherit; padding:7px 8px; border:1px solid var(--hair); border-radius:7px;
+            background:var(--surface); color:var(--ink)">
+          <button id="joinRoom">참가</button>
+        </div>
         <label style="margin-bottom:9px">내 닉네임
           <input type="text" id="nick" maxlength="12" placeholder="나" style="flex:0 0 130px;
             font:inherit; padding:5px 8px; border:1px solid var(--hair); border-radius:6px;
@@ -952,6 +960,7 @@ function initLobby(){
     try { localStorage.setItem("rsp.nick", $("nick").value.trim()); } catch (e) {}
     PLAYERS.forEach(function(p){ if (p.id === MYID) p.name = myNick(); });
     renderLobby();
+    lobbyChanged(MYID);
   };
   PLAYERS = [{id: MYID, name: myNick(), team: "exp", bot: false}];
   BOTSEQ = 0;
@@ -977,8 +986,10 @@ function renderLobby(){
       mv.textContent = t === "exp" ? "→" : "←";
       mv.title = "반대 팀으로 옮기기";
       mv.onclick = function(){
+        if (FB.mode === "guest" && p.id !== MYID) return;   /* 참가자는 자기만 */
         p.team = (t === "exp" ? "sha" : "exp");
         renderLobby();
+        lobbyChanged(p.id);
       };
       row.appendChild(mv);
 
@@ -990,6 +1001,7 @@ function renderLobby(){
         rm.onclick = function(){
           PLAYERS = PLAYERS.filter(function(q){ return q.id !== p.id; });
           renderLobby();
+          lobbyChanged();
         };
         row.appendChild(rm);
       }
@@ -1011,7 +1023,7 @@ function renderLobby(){
   $("startBtn").disabled = bad;
   $("randBtn").disabled = bad;
   Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
-    b.disabled = PLAYERS.length >= MAXP;
+    b.disabled = PLAYERS.length >= MAXP || FB.mode === "guest";
   });
 }
 
@@ -1103,6 +1115,7 @@ var NET = (function(){
     on: on,
     emit: emit,
     mode: function(){ return mode; },
+    setMode: function(m){ mode = m; uid = (window.FB && FB.uid) || uid; },
     uid: function(){ return uid; },
     room: function(){ return room; },
     isHost: function(){ return mode !== "guest"; },
@@ -1129,11 +1142,12 @@ var NET = (function(){
     chat: function(scope, text){
       text = String(text || "").trim();
       if (!text) return;
-      var msg = {uid: uid, name: myNick(), text: text, at: Date.now(), scope: scope};
-      if (mode !== "local"){
-        /* TODO(firebase): rooms/<room>/chat/<scope> 에 push */
+      if (mode !== "local" && window.FB && FB.ref){
+        FB.ref.child("chat/" + scope).push(
+          {uid: FB.uid, name: myNick(), text: text, at: Date.now()});
+        return;                       /* 수신은 구독으로 돌아온다 */
       }
-      emit("chat", msg);
+      emit("chat", {uid: uid, name: myNick(), text: text, at: Date.now(), scope: scope});
     }
   };
 })();
@@ -1150,6 +1164,187 @@ NET.on("intent", function(m){
 });
 
 NET.on("state", function(){ refresh(); });
+
+/* ---------- Firebase 연결 (방 · 로비 · 채팅 동기화) ----------
+   설계는 docs/MULTIPLAYER.md, 보안 규칙은 docs/database.rules.json.
+
+   이번 단계에서 동기화하는 것: 참가자 목록 / 팀 배치 / 아이템 분배 / 투표 방식 /
+   채팅. 게임 진행(갈림길·가위바위보) 동기화는 다음 단계다 — 지금은 방장
+   브라우저에서만 돌고, 참가자에게는 아직 중계되지 않는다. */
+var FB = {db: null, uid: null, room: null, ref: null, host: null, mode: "local"};
+
+var FB_SDK = [
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js",
+  "https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"
+];
+
+function fbEnabled(){ return !!(window.RSP_CONFIG && window.RSP_CONFIG.firebase); }
+
+function loadScript(src){
+  return new Promise(function(ok, no){
+    var s = document.createElement("script");
+    s.src = src; s.onload = ok; s.onerror = function(){ no(new Error(src)); };
+    document.head.appendChild(s);
+  });
+}
+
+function fbConnect(){
+  if (FB.db) return Promise.resolve();
+  if (!fbEnabled()) return Promise.reject(new Error("설정 없음"));
+  /* app -> auth -> database 순서로 받아야 한다 */
+  return FB_SDK.reduce(function(p, src){
+    return p.then(function(){ return loadScript(src); });
+  }, Promise.resolve())
+  .then(function(){
+    firebase.initializeApp(window.RSP_CONFIG.firebase);
+    return firebase.auth().signInAnonymously();
+  })
+  .then(function(c){
+    FB.uid = c.user.uid;
+    FB.db = firebase.database();
+  });
+}
+
+function roomCode(){
+  var A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   /* 헷갈리는 I,O,0,1 제외 */
+  var s = "";
+  for (var i = 0; i < 4; i++) s += A[Math.floor(Math.random() * A.length)];
+  return s;
+}
+
+function roomMsg(t, bad){
+  var el = $("roomNote");
+  el.textContent = t;
+  el.style.color = bad ? "var(--bad)" : "";
+}
+
+function readSetup(){
+  return {
+    items: {
+      exp: {re: +$("iReE").value | 0, win: +$("iWinE").value | 0, sk: +$("iSkE").value | 0},
+      sha: {re: +$("iReS").value | 0, win: +$("iWinS").value | 0, sk: +$("iSkS").value | 0}
+    },
+    voteRule: $("voteRule").value
+  };
+}
+function applySetup(v){
+  if (!v || !v.items) return;
+  $("iReE").value = v.items.exp.re;  $("iReS").value = v.items.sha.re;
+  $("iWinE").value = v.items.exp.win; $("iWinS").value = v.items.sha.win;
+  $("iSkE").value = v.items.exp.sk;   $("iSkS").value = v.items.sha.sk;
+  $("voteRule").value = v.voteRule || "majority";
+}
+function pushSetup(){
+  if (FB.mode === "host" && FB.ref) FB.ref.child("setup").set(readSetup());
+}
+
+function playersToMap(){
+  var m = {};
+  PLAYERS.forEach(function(p){ m[p.id] = {name: p.name, team: p.team, bot: !!p.bot}; });
+  return m;
+}
+
+function subscribeRoom(){
+  FB.ref.child("players").on("value", function(sn){
+    var v = sn.val() || {};
+    PLAYERS = Object.keys(v).map(function(k){
+      return {id: k, name: v[k].name, team: v[k].team, bot: !!v[k].bot};
+    });
+    renderLobby();
+  });
+  FB.ref.child("setup").on("value", function(sn){ applySetup(sn.val()); });
+  ["all", "exp", "sha"].forEach(function(sc){
+    FB.ref.child("chat/" + sc).limitToLast(50).on("child_added", function(sn){
+      var m = sn.val() || {};
+      m.scope = sc;
+      CHAT[sc].push(m);
+      if (CHAT[sc].length > 80) CHAT[sc].shift();
+      renderChat();
+    });
+  });
+  FB.ref.child("players/" + FB.uid).onDisconnect().remove();
+  updateRoomUI();
+}
+
+function updateRoomUI(){
+  var on = FB.mode !== "local";
+  $("netTag").textContent = on
+    ? ("방 " + FB.room + " · " + (FB.mode === "host" ? "방장" : "참가자"))
+    : (fbEnabled() ? "로컬 (방 미개설)" : "로컬");
+  $("roomCode").textContent = on ? FB.room : "";
+  $("mkRoom").disabled = on;
+  $("joinRoom").disabled = on;
+  $("roomIn").disabled = on;
+  /* 참가자는 아이템 분배와 투표 방식을 못 고친다 — 방장만 정한다 */
+  var ro = (FB.mode === "guest");
+  ["iReE","iReS","iWinE","iWinS","iSkE","iSkS","voteRule"].forEach(function(id){
+    $(id).disabled = ro;
+  });
+  $("startBtn").disabled = $("startBtn").disabled || ro;
+  $("randBtn").disabled = $("randBtn").disabled || ro;
+  if (ro) roomMsg("방장이 아이템과 지점을 정합니다. 채팅으로 의견을 내세요.");
+}
+
+function createRoom(){
+  roomMsg("방 만드는 중…");
+  fbConnect().then(function(){
+    var code = roomCode();
+    FB.room = code;
+    FB.ref = FB.db.ref("rooms/" + code);
+    FB.host = FB.uid;
+    /* 내 슬롯의 id 를 익명 uid 로 갈아끼운다 */
+    PLAYERS.forEach(function(p){ if (p.id === MYID) p.id = FB.uid; });
+    MYID = FB.uid;
+    return FB.ref.set({
+      meta: {host: FB.uid, phase: "lobby", createdAt: firebase.database.ServerValue.TIMESTAMP},
+      players: playersToMap(),
+      setup: readSetup()
+    });
+  }).then(function(){
+    FB.mode = "host";
+    NET.setMode("host");
+    subscribeRoom();
+    roomMsg("방 " + FB.room + " 개설. 이 코드를 팀원에게 알려주세요.");
+  }).catch(function(e){
+    roomMsg("방 개설 실패: " + (e && e.message ? e.message : e), true);
+  });
+}
+
+function joinRoom(){
+  var code = ($("roomIn").value || "").trim().toUpperCase();
+  if (code.length !== 4){ roomMsg("방 코드는 4자리입니다.", true); return; }
+  roomMsg("들어가는 중…");
+  fbConnect().then(function(){
+    FB.room = code;
+    FB.ref = FB.db.ref("rooms/" + code);
+    return FB.ref.child("meta").once("value");
+  }).then(function(sn){
+    if (!sn.exists()) throw new Error("그런 방이 없습니다");
+    FB.host = sn.val().host;
+    MYID = FB.uid;
+    return FB.ref.child("players/" + FB.uid)
+      .set({name: myNick(), team: "exp", bot: false});
+  }).then(function(){
+    FB.mode = "guest";
+    NET.setMode("guest");
+    subscribeRoom();
+    roomMsg("방 " + FB.room + " 참가.");
+  }).catch(function(e){
+    roomMsg("참가 실패: " + (e && e.message ? e.message : e), true);
+    FB.ref = null; FB.room = null;
+  });
+}
+
+/* 로비 변경을 서버에 반영한다. 방장은 전원을, 참가자는 자기 자신만 바꾼다. */
+function lobbyChanged(who){
+  if (FB.mode === "local" || !FB.ref) return;
+  if (FB.mode === "host"){ FB.ref.child("players").set(playersToMap()); return; }
+  if (who && who === MYID){
+    var me = PLAYERS.filter(function(p){ return p.id === MYID; })[0];
+    if (me) FB.ref.child("players/" + MYID).set({name: me.name, team: me.team, bot: false});
+  }
+}
 
 /* ---------- 채팅 ---------- */
 var CHAT = {all: [], exp: [], sha: []};
@@ -1588,9 +1783,15 @@ Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
   b.onclick = function(){ addBot(b.dataset.team); renderLobby(); };
 });
 initLobby();
+$("mkRoom").onclick = createRoom;
+$("joinRoom").onclick = joinRoom;
+["iReE","iReS","iWinE","iWinS","iSkE","iSkS","voteRule"].forEach(function(id){
+  $(id).addEventListener("change", function(){ addBotSync(); pushSetup(); });
+});
+function addBotSync(){ if (FB.mode === "host") lobbyChanged(); }
 $("chatSend").onclick = sendChat;
 $("chatIn").addEventListener("keydown", function(e){ if (e.key === "Enter") sendChat(); });
-$("netTag").textContent = NET.ready() ? "온라인 가능" : "로컬";
+$("netTag").textContent = fbEnabled() ? "로컬 (방 미개설)" : "로컬";
 renderChat();
 $("resetCareer").onclick = function(){
   CAREER = {games:0, expWins:0, shaWins:0, rpsExp:0, rpsSha:0, junc:0};
