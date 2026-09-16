@@ -102,6 +102,27 @@ h2{font-size:15px; margin:0 0 10px; font-weight:600; letter-spacing:-.01em}
 .row .k{color:var(--muted); font-size:13px}
 .row .v{font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; font-weight:600}
 
+/* --- 로비 --- */
+.factions{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px}
+@media (max-width:420px){ .factions{grid-template-columns:1fr} }
+.faction{border:1px solid var(--hair); border-radius:8px; padding:9px 10px; background:var(--surface-2)}
+.faction.exp{border-top:3px solid var(--exp)}
+.faction.sha{border-top:3px solid var(--sha)}
+.fhead{display:flex; align-items:center; gap:6px; font-weight:600; font-size:13px; margin-bottom:7px}
+.fhead span{margin-left:auto; font-family:"IBM Plex Mono",monospace; color:var(--muted)}
+.plist{display:flex; flex-direction:column; gap:4px; min-height:26px}
+.prow{display:flex; align-items:center; gap:5px; background:var(--surface);
+      border:1px solid var(--hair); border-radius:6px; padding:3px 4px 3px 8px; font-size:12px}
+.prow.me{border-color:var(--exp)}
+.pname{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+button.tiny{padding:1px 6px; font-size:12px; line-height:1.5; border-radius:5px}
+button.addbot{width:100%; margin-top:7px; font-size:12px; padding:5px 8px; background:transparent;
+      border-style:dashed}
+.turn{margin:6px 0; padding:6px 9px; background:var(--surface-2); border-radius:6px;
+      border-left:3px solid var(--exp); font-size:13px}
+.chip.yes{border-color:var(--exp); background:var(--exp-soft)}
+.chip.no{border-color:var(--sha); background:var(--sha-soft); opacity:.75}
+
 .teams{display:grid; grid-template-columns:1fr 1fr; gap:10px}
 .team{border:1px solid var(--hair); border-radius:8px; padding:10px 11px; background:var(--surface-2)}
 .team.exp{border-left:3px solid var(--exp)}
@@ -194,26 +215,43 @@ select{
 
     <div>
       <div class="panel" id="setupPanel"><div class="pad">
-        <h2>설정</h2>
+        <h2>로비 <span class="mine" id="hostTag">방장: 나</span></h2>
+
+        <div class="factions">
+          <div class="faction exp">
+            <div class="fhead"><i class="dot exp"></i>원정대 <span id="cntExp">0</span></div>
+            <div class="plist" id="listExp"></div>
+            <button class="addbot" data-team="exp">+ 봇 추가</button>
+          </div>
+          <div class="faction sha">
+            <div class="fhead"><i class="dot sha"></i>쉐도우 <span id="cntSha">0</span></div>
+            <div class="plist" id="listSha"></div>
+            <button class="addbot" data-team="sha">+ 봇 추가</button>
+          </div>
+        </div>
+        <p class="note" id="lobbyWarn"></p>
+
         <fieldset>
-          <legend>인원</legend>
-          <label>원정대 <input type="number" id="nExp" min="1" max="8" value="4"></label>
-          <label>쉐도우 <input type="number" id="nSha" min="1" max="4" value="2"></label>
-          <label>내 팀
-            <select id="myTeam">
-              <option value="exp">원정대</option>
-              <option value="sha">쉐도우</option>
-            </select>
-          </label>
-          <p class="note">쉐도우가 3명 이상이면 서로 다른 기호로 갈라 내서 무승부를 무한히 만들 수 있습니다. 2명까지를 권합니다.</p>
-        </fieldset>
-        <fieldset>
-          <legend>아이템 (원정대 / 쉐도우)</legend>
+          <legend>아이템 분배 (원정대 / 쉐도우)</legend>
           <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="1"> / <input type="number" id="iReS" min="0" max="5" value="1"></span></label>
           <label>무조건승리 <span><input type="number" id="iWinE" min="0" max="5" value="0"> / <input type="number" id="iWinS" min="0" max="5" value="0"></span></label>
           <label>스킵·직진 <span><input type="number" id="iSkE" min="0" max="5" value="0"> / <input type="number" id="iSkS" min="0" max="5" value="0"></span></label>
-          <p class="note">기본값은 시뮬레이션 권고안입니다 — 공릉 24개 루트 중앙값 49.7%.</p>
+          <p class="note">기본값은 시뮬레이션 권고안 — 공릉 24개 루트 중앙값 49.7%.</p>
         </fieldset>
+
+        <fieldset>
+          <legend>아이템 사용 결정</legend>
+          <label>팀 투표 방식
+            <select id="voteRule">
+              <option value="unanimous">만장일치</option>
+              <option value="majority" selected>과반</option>
+              <option value="host">방장 단독</option>
+              <option value="none">투표 없음 (제안 즉시)</option>
+            </select>
+          </label>
+          <p class="note">봇은 그 갈림길에서 지는 손해가 클 때(40분 이상) 찬성합니다. 만장일치로 두면 값싼 갈림길에 아이템을 낭비하지 않게 됩니다.</p>
+        </fieldset>
+
         <div class="btnrow">
           <button class="primary" id="startBtn">지점 고르기</button>
           <button class="ghost" id="randBtn">무작위 배치</button>
@@ -666,6 +704,144 @@ function refresh(){
   draw();
 }
 
+/* ---------- 플레이어 & 로비 ----------
+   플레이어는 사람 또는 봇이고, 시작 전에만 팀을 옮길 수 있다. 시작하면
+   G.roster 로 굳어져 그 판 내내 고정된다(팀 채팅도 3단계에서 여기에 종속된다). */
+var MAXP = 10;
+var MYID = "me";
+var PLAYERS = [];
+var BOTSEQ = 0;
+
+function teamCount(t){
+  return PLAYERS.filter(function(p){ return p.team === t; }).length;
+}
+function addBot(team){
+  if (PLAYERS.length >= MAXP) return;
+  BOTSEQ++;
+  PLAYERS.push({id: "b" + BOTSEQ, name: "봇 " + BOTSEQ, team: team, bot: true});
+}
+function initLobby(){
+  PLAYERS = [{id: MYID, name: "나", team: "exp", bot: false}];
+  BOTSEQ = 0;
+  addBot("exp"); addBot("exp"); addBot("exp");
+  addBot("sha"); addBot("sha");
+  renderLobby();
+}
+
+function renderLobby(){
+  ["exp", "sha"].forEach(function(t){
+    var box = $(t === "exp" ? "listExp" : "listSha");
+    box.innerHTML = "";
+    PLAYERS.filter(function(p){ return p.team === t; }).forEach(function(p){
+      var row = document.createElement("div");
+      row.className = "prow" + (p.id === MYID ? " me" : "");
+      var nm = document.createElement("span");
+      nm.className = "pname";
+      nm.textContent = (p.bot ? "AI " : "") + p.name;
+      row.appendChild(nm);
+
+      var mv = document.createElement("button");
+      mv.className = "tiny";
+      mv.textContent = t === "exp" ? "→" : "←";
+      mv.title = "반대 팀으로 옮기기";
+      mv.onclick = function(){
+        p.team = (t === "exp" ? "sha" : "exp");
+        renderLobby();
+      };
+      row.appendChild(mv);
+
+      if (p.bot){
+        var rm = document.createElement("button");
+        rm.className = "tiny";
+        rm.textContent = "✕";
+        rm.title = "내보내기";
+        rm.onclick = function(){
+          PLAYERS = PLAYERS.filter(function(q){ return q.id !== p.id; });
+          renderLobby();
+        };
+        row.appendChild(rm);
+      }
+      box.appendChild(row);
+    });
+  });
+
+  var e = teamCount("exp"), s = teamCount("sha");
+  $("cntExp").textContent = e;
+  $("cntSha").textContent = s;
+
+  var w = [];
+  if (!e || !s) w.push("양 팀에 최소 한 명씩 있어야 시작할 수 있습니다.");
+  if (s >= 3) w.push("쉐도우가 3명 이상이면 세 기호로 갈라 무승부를 영원히 만들 수 있습니다 — 규칙 구멍이라 2명까지 권합니다.");
+  if (PLAYERS.length >= MAXP) w.push("정원 " + MAXP + "명이 찼습니다.");
+  $("lobbyWarn").textContent = w.join(" ");
+
+  var bad = !e || !s;
+  $("startBtn").disabled = bad;
+  $("randBtn").disabled = bad;
+  Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
+    b.disabled = PLAYERS.length >= MAXP;
+  });
+}
+
+/* ---------- 아이템 사용 투표 ----------
+   봇은 그 갈림길에서 지는 손해(Δ)가 클 때만 찬성한다. 그래서 만장일치로
+   두면 값싼 갈림길에 아이템을 낭비할 수 없게 된다. */
+var BOT_YES_DELTA = 40;
+
+function teamMembers(t){
+  var out = [];
+  G.roster.forEach(function(p, i){ if (p.team === t) out.push({p: p, i: i}); });
+  return out;
+}
+
+function runVote(kind, label, onPass){
+  var my = G.cfg.myTeam, rule = G.cfg.voteRule;
+  if (rule === "none" || rule === "host"){ onPass(); return; }
+
+  var mates = teamMembers(my);
+  var humans = mates.filter(function(m){ return !m.p.bot && m.p.id !== MYID; });
+  var ballots = {};
+  ballots[MYID] = true;                                  /* 제안자는 찬성 */
+  mates.forEach(function(m){
+    if (m.p.bot) ballots[m.p.id] = G.pend.delta >= BOT_YES_DELTA;
+  });
+
+  function tally(){
+    var yes = 0, tot = 0;
+    mates.forEach(function(m){ tot++; if (ballots[m.p.id]) yes++; });
+    var ok = rule === "unanimous" ? (yes === tot) : (yes * 2 > tot);
+    var chips = mates.map(function(m){
+      return '<span class="chip ' + (ballots[m.p.id] ? "yes" : "no") + '">'
+        + (m.p.bot ? "AI " : "") + m.p.name + ' ' + (ballots[m.p.id] ? "찬성" : "반대") + '</span>';
+    }).join("");
+    setPanel("투표 결과",
+      '<p style="margin:0 0 8px">' + label + ' · ' + (rule === "unanimous" ? "만장일치" : "과반")
+      + ' 기준 <b>' + yes + '/' + tot + '</b></p>'
+      + '<div class="throws">' + chips + '</div>'
+      + '<div class="btnrow"><button class="primary" id="voteOk">'
+      + (ok ? "사용" : "확인") + '</button></div>');
+    $("voteOk").onclick = function(){
+      if (ok) onPass();
+      else { log("투표 부결 — " + label); declarePhase(); }
+    };
+  }
+
+  function askNext(){
+    var pend = humans.filter(function(m){ return !(m.p.id in ballots); });
+    if (!pend.length){ tally(); return; }
+    var m = pend[0];
+    setPanel("팀 투표",
+      '<p style="margin:0 0 8px">' + label + ' · 이 갈림길 손해 <b>'
+      + G.pend.delta.toFixed(1) + '분</b></p>'
+      + '<p class="turn"><b>' + m.p.name + '</b> 차례</p>'
+      + '<div class="btnrow"><button class="primary" id="vy">찬성</button>'
+      + '<button id="vn">반대</button></div>');
+    $("vy").onclick = function(){ ballots[m.p.id] = true; askNext(); };
+    $("vn").onclick = function(){ ballots[m.p.id] = false; askNext(); };
+  }
+  askNext();
+}
+
 /* ---------- 게임 진행 ---------- */
 function setPanel(title, html){
   $("jTitle").textContent = title;
@@ -673,14 +849,23 @@ function setPanel(title, html){
 }
 
 function begin(){
+  var exp = PLAYERS.filter(function(p){ return p.team === "exp"; });
+  var sha = PLAYERS.filter(function(p){ return p.team === "sha"; });
+  var roster = exp.concat(sha).map(function(p){
+    return {id: p.id, name: p.name, team: p.team, bot: p.bot};
+  });
+  var me = roster.filter(function(p){ return p.id === MYID; })[0];
   var cfg = {
-    nExp: Math.max(1, +$("nExp").value|0), nSha: Math.max(1, +$("nSha").value|0),
-    myTeam: $("myTeam").value,
+    nExp: exp.length, nSha: sha.length,
+    myTeam: me ? me.team : "exp",
+    voteRule: $("voteRule").value,
     iReE:+$("iReE").value|0, iReS:+$("iReS").value|0,
     iWinE:+$("iWinE").value|0, iWinS:+$("iWinS").value|0,
     iSkE:+$("iSkE").value|0, iSkS:+$("iSkS").value|0
   };
   G = freshGame(cfg);
+  G.roster = roster;
+  G.hands = {};
   $("log").innerHTML = "";
   $("setupPanel").classList.add("hidden");
   if (MAP && GRAPH_LINE) MAP.fitBounds(GRAPH_LINE.getBounds());
@@ -773,8 +958,12 @@ function declarePhase(){
   if (canSk)  btns += '<button id="useSk">스킵·직진 (' + G.items[my].sk + ')</button>';
   btns += '<button class="primary" id="goRps">가위바위보</button></div>';
   setPanel("갈림길 " + G.nJunc, html + btns);
-  if (canWin) $("useWin").onclick = function(){ useWin(my); };
-  if (canSk)  $("useSk").onclick  = function(){ useSkip(my); };
+  if (canWin) $("useWin").onclick = function(){
+    runVote("win", "무조건승리", function(){ useWin(my); });
+  };
+  if (canSk)  $("useSk").onclick  = function(){
+    runVote("sk", "스킵·직진", function(){ useSkip(my); });
+  };
   $("goRps").onclick = function(){ resolveDeclarations(false, false); };
   refresh();
 }
@@ -830,21 +1019,26 @@ function quickRps(){
   return alive[0] < G.cfg.nExp ? "exp" : "sha";
 }
 
-/* 플레이어 0..nExp-1 = 원정대, 그 뒤 = 쉐도우. 사람은 내 팀의 첫 번째 슬롯. */
-function myIndex(){ return G.cfg.myTeam === "exp" ? 0 : G.cfg.nExp; }
+/* 로스터는 시작 시 원정대 먼저, 쉐도우 나중 순으로 굳힌다. 그래서
+   인덱스가 nExp 보다 작으면 원정대다. */
+function myIndex(){
+  for (var i = 0; i < G.roster.length; i++) if (G.roster[i].id === MYID) return i;
+  return -1;
+}
 function teamOf(i){ return i < G.cfg.nExp ? "exp" : "sha"; }
+function pname(i){ return (G.roster[i].bot ? "AI " : "") + G.roster[i].name; }
 
 function startRps(){
-  var n = G.cfg.nExp + G.cfg.nSha;
+  var n = G.roster.length;
   G.alive = []; for (var i = 0; i < n; i++) G.alive.push(i);
-  G.round = 0; G.phase = "rps";
+  G.round = 0; G.hands = {}; G.phase = "rps";
   rpsPrompt();
 }
 
 function aliveSplit(){
   var e = 0, s = 0;
   G.alive.forEach(function(i){ if (teamOf(i) === "exp") e++; else s++; });
-  return {e:e, s:s};
+  return {e: e, s: s};
 }
 
 function rpsPrompt(){
@@ -853,23 +1047,29 @@ function rpsPrompt(){
      33.36% vs 33.38%), 라운드만 6.22 -> 5.64 로 줄어든다. */
   var at = aliveSplit();
   if (at.e === 0 || at.s === 0){ rpsDone(); return; }
-  var me = myIndex(), iAmIn = G.alive.indexOf(me) >= 0;
+
+  var pend = G.alive.filter(function(i){
+    return !G.roster[i].bot && !(i in G.hands);
+  });
   var html = '<p style="margin:0 0 8px">' + G.round + '라운드 진행 · 남은 인원 <b>'
-    + G.alive.length + '명</b></p>' + renderThrows();
-  if (iAmIn){
-    html += '<div class="btnrow" style="margin-top:8px">'
-      + HAND.map(function(h,i){ return '<button data-h="'+i+'" class="h">'+h+'</button>'; }).join("")
-      + '</div>';
-  } else {
-    html += '<div class="btnrow" style="margin-top:8px"><button class="primary" id="nextR">계속</button></div>';
-  }
-  setPanel("가위바위보", html);
-  if (iAmIn){
+           + G.alive.length + '명</b> (원정대 ' + at.e + ' · 쉐도우 ' + at.s + ')</p>'
+           + renderThrows();
+
+  if (pend.length){
+    var who = pend[0];
+    html += '<p class="turn"><b>' + pname(who) + '</b> 차례'
+          + (G.alive.length === G.roster.length ? "" : " — 아직 살아 있습니다") + '</p>'
+          + '<div class="btnrow">'
+          + HAND.map(function(h, i){ return '<button data-h="' + i + '" class="h">' + h + '</button>'; }).join("")
+          + '</div>';
+    setPanel("가위바위보", html);
     Array.prototype.forEach.call(document.querySelectorAll("button.h"), function(b){
-      b.onclick = function(){ rpsRound(+b.dataset.h); };
+      b.onclick = function(){ G.hands[who] = +b.dataset.h; rpsPrompt(); };
     });
   } else {
-    $("nextR").onclick = function(){ rpsRound(null); };
+    html += '<div class="btnrow"><button class="primary" id="nextR">결과 보기</button></div>';
+    setPanel("가위바위보", html);
+    $("nextR").onclick = resolveRound;
   }
   refresh();
 }
@@ -879,22 +1079,22 @@ function renderThrows(){
   var out = '<div class="throws">';
   G.throws.forEach(function(t){
     out += '<span class="chip ' + teamOf(t.i) + (t.out ? " out" : "") + '">'
-      + (t.i === myIndex() ? "나" : teamName(teamOf(t.i)).slice(0,2) + (t.i+1))
+      + (t.i === myIndex() ? "나" : pname(t.i))
       + ' <span class="hand">' + HAND[t.h] + '</span></span>';
   });
   return out + "</div>";
 }
 
-function rpsRound(myHand){
+function resolveRound(){
   G.round++;
   G.t += SEC_PER_ROUND / 60;
-  var me = myIndex();
   var ts = G.alive.map(function(i){
-    return (i === me && myHand !== null) ? myHand : Math.floor(Math.random()*3);
+    return (i in G.hands) ? G.hands[i] : Math.floor(Math.random() * 3);
   });
+  G.hands = {};
   var ws = winnerSymbol(ts);
   G.throws = G.alive.map(function(i, k){
-    return {i:i, h:ts[k], out: ws !== null && ts[k] !== ws};
+    return {i: i, h: ts[k], out: ws !== null && ts[k] !== ws};
   });
   if (ws === null){
     log("무승부 (" + G.alive.length + "명)");
@@ -910,31 +1110,35 @@ function rpsDone(){
   CAREER[wt === 'exp' ? 'rpsExp' : 'rpsSha']++; saveCareer(); renderCareer();
   var my = G.cfg.myTeam, opp = my === "exp" ? "sha" : "exp";
   var loser = wt === "exp" ? "sha" : "exp";
-  log('가위바위보 <b>' + teamName(wt) + '</b> 승 (' + G.round + '라운드, ' + G.alive.length + '명 생존)');
+  log('가위바위보 <b>' + teamName(wt) + '</b> 승 (' + G.round + '라운드, '
+      + G.alive.length + '명 생존)');
 
-  /* 재도전권 — 진 쪽이 쓸 수 있다. 갈림길당 1회. */
-  if (!G.pend.retried && G.items[loser].re > 0 && G.pend.delta >= (loser === opp ? 40 : 0)){
+  /* 재도전권 — 진 쪽이 쓴다. 갈림길당 1회. */
+  if (!G.pend.retried && G.items[loser].re > 0){
     if (loser === my){
-      var html = '<p style="margin:0 0 8px">졌습니다 · 이 갈림길 손해 <b>'
+      setPanel("재도전?",
+        '<p style="margin:0 0 8px">졌습니다 · 이 갈림길 손해 <b>'
         + G.pend.delta.toFixed(1) + '분</b></p>' + renderThrows()
         + '<div class="btnrow" style="margin-top:8px">'
         + '<button class="primary" id="doRe">재도전권 사용 (' + G.items[my].re + ')</button>'
-        + '<button id="skipRe">그냥 간다</button></div>';
-      setPanel("재도전?", html);
+        + '<button id="skipRe">그냥 간다</button></div>');
       $("doRe").onclick = function(){
-        G.items[my].re--; G.pend.retried = true;
-        log('<span class="'+(my==="exp"?"e":"s")+'">'+teamName(my)+'</span> 재도전권 사용');
-        startRps();
+        runVote("re", "재도전권", function(){
+          G.items[my].re--; G.pend.retried = true;
+          log('<span class="' + (my === "exp" ? "e" : "s") + '">' + teamName(my) + '</span> 재도전권 사용');
+          startRps();
+        });
       };
       $("skipRe").onclick = function(){ takeDir(wt); };
       refresh();
       return;
     }
-    /* AI 가 진 경우 */
-    G.items[loser].re--; G.pend.retried = true;
-    log('<span class="'+(loser==="exp"?"e":"s")+'">'+teamName(loser)+'</span> 재도전권 사용');
-    startRps();
-    return;
+    if (G.pend.delta >= BOT_YES_DELTA){        /* 상대 팀(AI)은 손해가 클 때만 */
+      G.items[loser].re--; G.pend.retried = true;
+      log('<span class="' + (loser === "exp" ? "e" : "s") + '">' + teamName(loser) + '</span> 재도전권 사용');
+      startRps();
+      return;
+    }
   }
   takeDir(wt);
 }
@@ -1002,6 +1206,10 @@ function finish(arrived){
 }
 
 /* ---------- 부팅 ---------- */
+Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
+  b.onclick = function(){ addBot(b.dataset.team); renderLobby(); };
+});
+initLobby();
 $("resetCareer").onclick = function(){
   CAREER = {games:0, expWins:0, shaWins:0, rpsExp:0, rpsSha:0, junc:0};
   saveCareer(); renderCareer(); log("누적 기록 초기화");
