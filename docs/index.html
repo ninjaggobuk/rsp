@@ -1205,6 +1205,14 @@ function sendChat(){
 }
 
 /* ---------- 게임 진행 ---------- */
+/* 선택이 확정되면 즉시 버튼을 잠근다. move() 는 120ms 뒤에 다음 단계로 가는데
+   그 사이 옛 버튼을 다시 누르면 이미 이동한 위치에서 인접하지 않은 목적지를
+   고르게 되어 거리 계산이 Infinity 가 되고 시계가 깨진다(2026-09-17 실측). */
+function lockPanel(){
+  Array.prototype.forEach.call(document.querySelectorAll("#jBody button"),
+    function(b){ b.disabled = true; });
+}
+
 function setPanel(title, html){
   $("jTitle").textContent = title;
   $("jBody").innerHTML = html;
@@ -1344,6 +1352,7 @@ function straightOption(){
 
 function useWin(team){ resolveDeclarations(team === G.cfg.myTeam ? true : false, false, team); }
 function useSkip(team){
+  lockPanel();
   G.items[team].sk--;
   var w = straightOption();
   log('<span class="'+(team==="exp"?"e":"s")+'">'+teamName(team)+'</span> 스킵·직진 사용');
@@ -1360,9 +1369,9 @@ function resolveDeclarations(myWin, mySkip, whoWin){
     log("양 팀 무조건승리 동시 선언 → 사용권 <b>" + teamName(w) + "</b>");
     if (w === my) oWin = false; else eWin = false;
   }
-  if (eWin){ G.items[my].win--; log('<span class="'+(my==="exp"?"e":"s")+'">'+teamName(my)+'</span> 무조건승리 사용');
+  if (eWin){ lockPanel(); G.items[my].win--; log('<span class="'+(my==="exp"?"e":"s")+'">'+teamName(my)+'</span> 무조건승리 사용');
              takeDir(my); return; }
-  if (oWin){ G.items[opp].win--; log('<span class="'+(opp==="exp"?"e":"s")+'">'+teamName(opp)+'</span> 무조건승리 사용');
+  if (oWin){ lockPanel(); G.items[opp].win--; log('<span class="'+(opp==="exp"?"e":"s")+'">'+teamName(opp)+'</span> 무조건승리 사용');
              takeDir(opp); return; }
   if (p.aiSkip){ useSkip(opp); return; }
   startRps();
@@ -1529,12 +1538,19 @@ function takeDir(team){
 }
 
 function chooseDir(w){
+  lockPanel();
   if (G.cfg.myTeam === "sha") G.nSha++;
   move(w, null);
 }
 
 function move(w, why){
-  G.t += edgeW(G.cur, w);
+  var dt = edgeW(G.cur, w);
+  if (!isFinite(dt)){          /* 인접하지 않은 목적지 = 중복 클릭. 무시한다 */
+    console.warn("인접하지 않은 이동 무시", G.cur, w);
+    return;
+  }
+  lockPanel();
+  G.t += dt;
   G.prev = G.cur; G.cur = w; G.trail.push(w);
   G.pend = null; G.throws = null;
   if (why) log(why + " · " + fmt(edgeW(G.prev, w)) + " 이동");
