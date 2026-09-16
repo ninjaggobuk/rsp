@@ -1,0 +1,64 @@
+Warning 3: Cannot find gdalvrt.xsd (GDAL_DATA is not defined)
+루트 교차검증 | tol 25m | MC 3000판
+
+  석계역        -> 공릉역          노원(기준)    1.97 km / 29.5분  채택
+      [retry 1/3] download 석계역-하계역 : ConnectTimeout
+      [retry 2/3] download 석계역-하계역 : ConnectTimeout
+      [retry 3/3] download 석계역-하계역 : ConnectTimeout
+  [skip] 석계역 -> 하계역 : ConnectTimeout
+      [retry 1/3] download 노원역-공릉역 : ConnectTimeout
+      [retry 2/3] download 노원역-공릉역 : ConnectTimeout
+      [retry 3/3] download 노원역-공릉역 : ConnectTimeout
+  [skip] 노원역 -> 공릉역 : ConnectTimeout
+      [retry 1/3] download 상계역-하계역 : ConnectTimeout
+      [retry 2/3] download 상계역-하계역 : ConnectTimeout
+      [retry 3/3] download 상계역-하계역 : ConnectTimeout
+  [skip] 상계역 -> 하계역 : ConnectTimeout
+      [retry 1/3] download 길음역-한성대입구역 : ConnectTimeout
+      [retry 2/3] download 길음역-한성대입구역 : ConnectTimeout
+      [retry 3/3] download 길음역-한성대입구역 : ConnectTimeout
+  [skip] 길음역 -> 한성대입구역 : ConnectTimeout
+      [retry 1/3] download 미아사거리역-성신여대입구역 : ConnectTimeout
+      [retry 2/3] download 미아사거리역-성신여대입구역 : ConnectTimeout
+      [retry 3/3] download 미아사거리역-성신여대입구역 : ConnectTimeout
+  [skip] 미아사거리역 -> 성신여대입구역 : ConnectTimeout
+      [retry 1/3] geocode 보문역 : InsufficientResponseError
+      [retry 2/3] geocode 보문역 : InsufficientResponseError
+      [retry 3/3] geocode 보문역 : InsufficientResponseError
+  [skip] 월곡역 -> 보문역 : InsufficientResponseError
+      [retry 1/3] download 성신여대입구역-안암역 : ConnectTimeout
+      [retry 2/3] download 성신여대입구역-안암역 : ConnectTimeout
+      [retry 3/3] download 성신여대입구역-안암역 : ConnectTimeout
+  [skip] 성신여대입구역 -> 안암역 : ConnectTimeout
+
+  채택 루트 1개로 구성별 90분 도착률을 비교한다.
+
+  === 4:2 아이템 없음 ===
+  루트                        | θ=40    θ=0   | 편차
+  --------------------------------------------------------
+  석계역        -> 공릉역          |   27.2%   27.2% |  0.0
+  루트 간 범위 27.2% ~ 27.2%  (폭 0.0%p)
+
+  === 4:2 재도전 2:1 ===
+  루트                        | θ=40    θ=0   | 편차
+  --------------------------------------------------------
+  석계역        -> 공릉역          |   52.3%   47.3% |  5.0
+  루트 간 범위 52.3% ~ 52.3%  (폭 0.0%p)
+
+  === 5:2 아이템 없음 ===
+  루트                        | θ=40    θ=0   | 편차
+  --------------------------------------------------------
+  석계역        -> 공릉역          |   36.8%   36.8% |  0.0
+  루트 간 범위 36.8% ~ 36.8%  (폭 0.0%p)
+
+  === 5:2 재도전 1:1 ===
+  루트                        | θ=40    θ=0   | 편차
+  --------------------------------------------------------
+  석계역        -> 공릉역          |   47.0%   48.1% |  1.1
+  루트 간 범위 47.0% ~ 47.0%  (폭 0.0%p)
+
+  === 5:2 원정대 직진1+재도전1 / 쉐도우 직진1 ===
+  루트                        | θ=40    θ=0   | 편차
+  --------------------------------------------------------
+  석계역        -> 공릉역          |   51.2%   53.4% |  2.2
+  루트 간 범위 51.2% ~ 51.2%  (폭 0.0%p)

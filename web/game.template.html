@@ -1,0 +1,915 @@
+<title>가위바위보 원정대</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+:root{
+  --ground:#E9EDF0; --surface:#FFFFFF; --surface-2:#F3F6F8;
+  --ink:#141C24; --muted:#5A6B78; --hair:#C9D4DC;
+  --exp:#0E7C7B; --exp-soft:#D3E9E8;
+  --sha:#9C2A63; --sha-soft:#F2DBE6;
+  --road:#9FB0BC; --road-hi:#5A6B78;
+  --warn:#B45309; --ok:#0E7C7B; --bad:#A3234B;
+  --shadow:0 1px 2px rgba(20,28,36,.08), 0 8px 24px rgba(20,28,36,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E141A; --surface:#161F27; --surface-2:#1D2831;
+    --ink:#E6EDF2; --muted:#93A6B3; --hair:#2C3A45;
+    --exp:#2FB6B2; --exp-soft:#123331;
+    --sha:#E8709F; --sha-soft:#3A1729;
+    --road:#3C4C58; --road-hi:#7E93A1;
+    --warn:#E0A44A; --ok:#2FB6B2; --bad:#E8709F;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E141A; --surface:#161F27; --surface-2:#1D2831;
+  --ink:#E6EDF2; --muted:#93A6B3; --hair:#2C3A45;
+  --exp:#2FB6B2; --exp-soft:#123331;
+  --sha:#E8709F; --sha-soft:#3A1729;
+  --road:#3C4C58; --road-hi:#7E93A1;
+  --warn:#E0A44A; --ok:#2FB6B2; --bad:#E8709F;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans KR", system-ui, -apple-system, sans-serif;
+  font-size:14px; line-height:1.55;
+}
+.wrap{max-width:1180px; margin:0 auto; padding-block:20px; padding-left:16px; padding-right:16px;}
+
+header{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:14px}
+h1{
+  font-size:22px; font-weight:700; letter-spacing:-.02em; margin:0;
+  text-wrap:balance;
+}
+.sub{color:var(--muted); font-size:13px}
+
+.board{display:grid; grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr); gap:16px; align-items:start}
+@media (max-width:860px){ .board{grid-template-columns:minmax(0,1fr)} }
+
+.panel{background:var(--surface); border:1px solid var(--hair); border-radius:10px; box-shadow:var(--shadow)}
+.panel > .pad{padding:14px 16px}
+.panel + .panel{margin-top:14px}
+
+#mapwrap{position:relative; background:var(--surface); border:1px solid var(--hair); border-radius:10px; overflow:hidden; box-shadow:var(--shadow)}
+canvas{display:block; width:100%; height:auto; touch-action:manipulation}
+#hint{
+  position:absolute; left:10px; top:10px; background:var(--surface);
+  border:1px solid var(--hair); border-radius:6px; padding:5px 9px;
+  font-size:12px; color:var(--muted); pointer-events:none; max-width:70%;
+}
+
+.eyebrow{font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); font-weight:600}
+h2{font-size:15px; margin:0 0 10px; font-weight:600; letter-spacing:-.01em}
+
+.clock{
+  font-family:"IBM Plex Mono", ui-monospace, monospace;
+  font-size:34px; font-weight:600; letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums; line-height:1.05;
+}
+.clock.over{color:var(--bad)}
+.limitline{display:flex; justify-content:space-between; align-items:baseline; gap:10px}
+.bar{height:6px; background:var(--surface-2); border-radius:3px; overflow:hidden; margin-top:8px}
+.bar > i{display:block; height:100%; background:var(--exp); width:0%}
+.bar > i.warn{background:var(--warn)}
+.bar > i.over{background:var(--bad)}
+
+.rows{display:flex; flex-direction:column; gap:8px}
+.row{display:flex; justify-content:space-between; align-items:center; gap:10px}
+.row .k{color:var(--muted); font-size:13px}
+.row .v{font-family:"IBM Plex Mono", monospace; font-variant-numeric:tabular-nums; font-weight:600}
+
+.teams{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+.team{border:1px solid var(--hair); border-radius:8px; padding:10px 11px; background:var(--surface-2)}
+.team.exp{border-left:3px solid var(--exp)}
+.team.sha{border-left:3px solid var(--sha)}
+.team .nm{font-weight:600; font-size:13px; display:flex; gap:6px; align-items:center}
+.dot{width:8px; height:8px; border-radius:50%; flex:none}
+.dot.exp{background:var(--exp)} .dot.sha{background:var(--sha)}
+.team .cnt{font-family:"IBM Plex Mono", monospace; font-size:22px; font-weight:600; font-variant-numeric:tabular-nums}
+.mine{font-size:11px; color:var(--muted)}
+
+button{
+  font:inherit; font-weight:500; cursor:pointer; border-radius:7px;
+  border:1px solid var(--hair); background:var(--surface); color:var(--ink);
+  padding:8px 13px; transition:background .12s, border-color .12s;
+}
+button:hover:not(:disabled){background:var(--surface-2)}
+button:disabled{opacity:.42; cursor:default}
+button:focus-visible{outline:2px solid var(--exp); outline-offset:2px}
+button.primary{background:var(--exp); border-color:var(--exp); color:#fff}
+button.primary:hover:not(:disabled){filter:brightness(1.08); background:var(--exp)}
+button.ghost{background:transparent}
+.btnrow{display:flex; gap:8px; flex-wrap:wrap}
+
+.throws{display:flex; gap:7px; flex-wrap:wrap; margin:8px 0}
+.chip{
+  display:inline-flex; align-items:center; gap:6px; padding:5px 9px; border-radius:999px;
+  border:1px solid var(--hair); font-size:12px; background:var(--surface-2);
+}
+.chip.exp{border-color:var(--exp); background:var(--exp-soft); color:var(--ink)}
+.chip.sha{border-color:var(--sha); background:var(--sha-soft); color:var(--ink)}
+.chip.out{opacity:.35; text-decoration:line-through}
+.chip .hand{font-family:"IBM Plex Mono", monospace; font-weight:600}
+
+.log{
+  font-family:"IBM Plex Mono", monospace; font-size:12px; line-height:1.7;
+  max-height:190px; overflow-y:auto; color:var(--muted);
+  border-top:1px solid var(--hair); padding-top:9px; margin-top:4px;
+}
+.log b{color:var(--ink); font-weight:600}
+.log .e{color:var(--exp)} .log .s{color:var(--sha)}
+
+fieldset{border:1px solid var(--hair); border-radius:8px; padding:11px 13px; margin:0 0 11px}
+legend{padding:0 6px; font-size:12px; color:var(--muted); font-weight:600}
+label{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:4px 0; font-size:13px}
+input[type=number]{
+  font:inherit; font-family:"IBM Plex Mono", monospace; width:64px; text-align:right;
+  padding:5px 7px; border:1px solid var(--hair); border-radius:6px;
+  background:var(--surface); color:var(--ink);
+}
+input[type=number]:focus-visible{outline:2px solid var(--exp); outline-offset:1px}
+select{
+  font:inherit; padding:5px 8px; border:1px solid var(--hair); border-radius:6px;
+  background:var(--surface); color:var(--ink);
+}
+.note{font-size:12px; color:var(--muted); margin:8px 0 0}
+.verdict{padding:12px 14px; border-radius:8px; font-weight:600; text-align:center; font-size:15px}
+.verdict.win{background:var(--exp-soft); color:var(--exp)}
+.verdict.lose{background:var(--sha-soft); color:var(--sha)}
+.hidden{display:none !important}
+@media (prefers-reduced-motion:reduce){ *{transition:none !important} }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>가위바위보 원정대</h1>
+    <span class="sub">공릉 실제 보행망 · 갈림길마다 전원 가위바위보 · 상대 팀이 전멸하면 그 팀이 방향 결정</span>
+  </header>
+
+  <div class="board">
+    <div>
+      <div id="mapwrap">
+        <canvas id="map"></canvas>
+        <div id="hint">지도에서 <b>출발 지점</b>을 누르세요</div>
+      </div>
+      <div class="panel" id="junctionPanel" style="margin-top:14px">
+        <div class="pad">
+          <div class="eyebrow" id="jTitle">설정</div>
+          <div id="jBody"></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel"><div class="pad">
+        <div class="limitline">
+          <div class="clock" id="clock">00:00</div>
+          <div class="v" id="limitTxt" style="color:var(--muted); font-size:13px">제한 60:00</div>
+        </div>
+        <div class="bar"><i id="bar"></i></div>
+        <div class="rows" style="margin-top:11px">
+          <div class="row"><span class="k">목적지까지 (직선 최단)</span><span class="v" id="remain">–</span></div>
+          <div class="row"><span class="k">지나온 갈림길</span><span class="v" id="njunc">0</span></div>
+          <div class="row"><span class="k">쉐도우가 방향 가져감</span><span class="v" id="nsha">0</span></div>
+          <div class="row"><span class="k">가위바위보 전적</span><span class="v" id="rpsRec">0 : 0</span></div>
+          <div class="row"><span class="k" style="color:var(--exp)">원정대 승률 / 이론</span><span class="v" id="rateExp">– / –</span></div>
+          <div class="row"><span class="k" style="color:var(--sha)">쉐도우 승률 / 이론</span><span class="v" id="rateSha">– / –</span></div>
+        </div>
+        <div class="btnrow" style="margin-top:11px">
+          <button id="extBtn" disabled>30분 연장권 사용</button>
+        </div>
+      </div></div>
+
+      <div class="panel"><div class="pad">
+        <h2>팀</h2>
+        <div class="teams">
+          <div class="team exp">
+            <div class="nm"><i class="dot exp"></i>원정대</div>
+            <div class="cnt" id="cExp">4</div>
+            <div class="mine" id="mExp">목적지 도달</div>
+          </div>
+          <div class="team sha">
+            <div class="nm"><i class="dot sha"></i>쉐도우</div>
+            <div class="cnt" id="cSha">2</div>
+            <div class="mine" id="mSha">시간 끌기</div>
+          </div>
+        </div>
+        <div class="rows" style="margin-top:11px" id="itemRows"></div>
+      </div></div>
+
+      <div class="panel"><div class="pad">
+        <h2>누적 기록</h2>
+        <div class="rows" id="careerRows"></div>
+        <div class="btnrow" style="margin-top:10px">
+          <button class="ghost" id="resetCareer">기록 지우기</button>
+        </div>
+      </div></div>
+
+      <div class="panel" id="setupPanel"><div class="pad">
+        <h2>설정</h2>
+        <fieldset>
+          <legend>인원</legend>
+          <label>원정대 <input type="number" id="nExp" min="1" max="8" value="4"></label>
+          <label>쉐도우 <input type="number" id="nSha" min="1" max="4" value="2"></label>
+          <label>내 팀
+            <select id="myTeam">
+              <option value="exp">원정대</option>
+              <option value="sha">쉐도우</option>
+            </select>
+          </label>
+          <p class="note">쉐도우가 3명 이상이면 서로 다른 기호로 갈라 내서 무승부를 무한히 만들 수 있습니다. 2명까지를 권합니다.</p>
+        </fieldset>
+        <fieldset>
+          <legend>아이템 (원정대 / 쉐도우)</legend>
+          <label>재도전권 <span><input type="number" id="iReE" min="0" max="5" value="1"> / <input type="number" id="iReS" min="0" max="5" value="1"></span></label>
+          <label>무조건승리 <span><input type="number" id="iWinE" min="0" max="5" value="0"> / <input type="number" id="iWinS" min="0" max="5" value="0"></span></label>
+          <label>스킵·직진 <span><input type="number" id="iSkE" min="0" max="5" value="0"> / <input type="number" id="iSkS" min="0" max="5" value="0"></span></label>
+          <p class="note">기본값은 시뮬레이션 권고안입니다 — 공릉 24개 루트 중앙값 49.7%.</p>
+        </fieldset>
+        <div class="btnrow">
+          <button class="primary" id="startBtn">지점 고르기</button>
+          <button class="ghost" id="randBtn">무작위 배치</button>
+        </div>
+      </div></div>
+
+      <div class="panel"><div class="pad">
+        <h2>기록</h2>
+        <div class="log" id="log"></div>
+      </div></div>
+    </div>
+  </div>
+</div>
+
+<script id="mapdata" type="application/json">__MAP_JSON__</script>
+<script>
+(function(){
+"use strict";
+
+var DATA = JSON.parse(document.getElementById("mapdata").textContent);
+var NODES = DATA.nodes, EDGES = DATA.edges;
+var SEC_PER_ROUND = DATA.meta.sec_per_rps_round || 4.0;
+var N = NODES.length;
+
+/* ---------- 그래프 ---------- */
+var adj = [];                       // adj[u] = [{v, w}]
+for (var i = 0; i < N; i++) adj.push([]);
+EDGES.forEach(function(e){
+  adj[e[0]].push({v:e[1], w:e[2]});
+  adj[e[1]].push({v:e[0], w:e[2]});
+});
+function edgeW(u, v){
+  var a = adj[u];
+  for (var i = 0; i < a.length; i++) if (a[i].v === v) return a[i].w;
+  return Infinity;
+}
+
+/* 최단 도보 시간 (다익스트라, 목적지에서 역방향) */
+function shortestFrom(goal){
+  var dist = new Float64Array(N).fill(Infinity);
+  dist[goal] = 0;
+  var heap = [[0, goal]];
+  while (heap.length){
+    heap.sort(function(a,b){return a[0]-b[0];});
+    var top = heap.shift(), d = top[0], u = top[1];
+    if (d > dist[u] + 1e-9) continue;
+    for (var i = 0; i < adj[u].length; i++){
+      var nb = adj[u][i], nd = d + nb.w;
+      if (nd < dist[nb.v] - 1e-9){ dist[nb.v] = nd; heap.push([nd, nb.v]); }
+    }
+  }
+  return dist;
+}
+
+/* ---------- 가치함수: 방향상태 (prev,cur) 에 대한 최소최대 가치반복 ----------
+   V = 목적지까지 남은 기대 소요(분). 갈림길에서 원정대가 확률 pExp 로 최선을,
+   쉐도우가 1-pExp 로 최악을 고른다. U턴은 선택지에서 뺀다. */
+var stateIdx = {};                  // "u>v" -> index
+var stateList = [];
+EDGES.forEach(function(e){
+  [[e[0],e[1]],[e[1],e[0]]].forEach(function(p){
+    var k = p[0] + ">" + p[1];
+    if (!(k in stateIdx)){ stateIdx[k] = stateList.length; stateList.push(p); }
+  });
+});
+function optionsOf(prev, cur){
+  var o = [];
+  for (var i = 0; i < adj[cur].length; i++){
+    var v = adj[cur][i].v;
+    if (v !== prev) o.push(v);
+  }
+  if (!o.length && prev !== null) o.push(prev);   // 막다른 길 -> 되돌아 나온다
+  return o;
+}
+function solveV(goal, pExp, tRps){
+  var V = new Float64Array(stateList.length);
+  for (var sweep = 0; sweep < 4000; sweep++){
+    var delta = 0;
+    for (var s = 0; s < stateList.length; s++){
+      var prev = stateList[s][0], cur = stateList[s][1];
+      if (cur === goal) continue;
+      var opts = optionsOf(prev, cur);
+      var mn = Infinity, mx = -Infinity;
+      for (var i = 0; i < opts.length; i++){
+        var w = opts[i];
+        var val = edgeW(cur, w) + V[stateIdx[cur + ">" + w]];
+        if (val < mn) mn = val;
+        if (val > mx) mx = val;
+      }
+      var nv = (opts.length >= 2) ? tRps + pExp*mn + (1-pExp)*mx : mn;
+      var d = Math.abs(nv - V[s]);
+      if (d > delta) delta = d;
+      V[s] = nv;
+    }
+    if (delta < 1e-6) break;
+  }
+  return V;
+}
+
+/* ---------- 가위바위보 (탈락식) ---------- */
+var HAND = ["바위","보","가위"];        // 0 바위, 1 보, 2 가위
+var BEATS = {0:2, 1:0, 2:1};
+function winnerSymbol(ts){
+  var s = Array.from(new Set(ts));
+  if (s.length !== 2) return null;
+  return BEATS[s[0]] === s[1] ? s[0] : s[1];
+}
+
+/* ---------- 상태 ---------- */
+var G = null;
+function freshGame(cfg){
+  return {
+    cfg: cfg, phase: "pickStart",
+    start: null, goal: null, prev: null, cur: null,
+    trail: [], t: 0, limit: 60, extUsed: false,
+    nJunc: 0, nSha: 0,
+    rpsWin: {exp:0, sha:0},      /* 가위바위보로 결판난 것만. 아이템 제외 */
+    items: {
+      exp: {re: cfg.iReE, win: cfg.iWinE, sk: cfg.iSkE},
+      sha: {re: cfg.iReS, win: cfg.iWinS, sk: cfg.iSkS}
+    },
+    V: null, dist: null, alive: null, throws: null, round: 0,
+    pend: null, over: null
+  };
+}
+
+/* ---------- 지도 그리기 ---------- */
+var cv = document.getElementById("map"), cx = cv.getContext("2d");
+var view = {x0:0, y0:0, x1:1, y1:1};
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+function fitView(nodes, padM){
+  var xs = nodes.map(function(i){return NODES[i].x;});
+  var ys = nodes.map(function(i){return NODES[i].y;});
+  var p = padM || 500;
+  var x0 = Math.min.apply(null,xs)-p, x1 = Math.max.apply(null,xs)+p;
+  var y0 = Math.min.apply(null,ys)-p, y1 = Math.max.apply(null,ys)+p;
+  var w = x1-x0, h = y1-y0, m = Math.max(w,h);
+  var mx = (x0+x1)/2, my = (y0+y1)/2;
+  view = {x0:mx-m/2, y0:my-m/2, x1:mx+m/2, y1:my+m/2};
+}
+function sx(x){ return (x - view.x0) / (view.x1 - view.x0) * cv.width; }
+function sy(y){ return cv.height - (y - view.y0) / (view.y1 - view.y0) * cv.height; }
+
+function sizeCanvas(){
+  var r = cv.parentElement.getBoundingClientRect();
+  var dpr = window.devicePixelRatio || 1;
+  var w = Math.max(280, r.width), h = Math.round(Math.min(560, Math.max(300, w * 0.78)));
+  cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr);
+  cv.style.height = h + "px";
+}
+
+function draw(){
+  if (!cv.width) return;
+  var road = cssVar("--road"), roadHi = cssVar("--road-hi");
+  var exp = cssVar("--exp"), sha = cssVar("--sha"), surf = cssVar("--surface");
+  var ink = cssVar("--ink");
+  cx.fillStyle = surf; cx.fillRect(0,0,cv.width,cv.height);
+
+  var k = cv.width / (view.x1 - view.x0);
+  cx.lineWidth = Math.max(0.6, 1.1 * k * 8);
+  cx.strokeStyle = road; cx.lineCap = "round";
+  cx.beginPath();
+  for (var i = 0; i < EDGES.length; i++){
+    var a = NODES[EDGES[i][0]], b = NODES[EDGES[i][1]];
+    var ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y);
+    if ((ax<-50&&bx<-50)||(ax>cv.width+50&&bx>cv.width+50)) continue;
+    if ((ay<-50&&by<-50)||(ay>cv.height+50&&by>cv.height+50)) continue;
+    cx.moveTo(ax,ay); cx.lineTo(bx,by);
+  }
+  cx.stroke();
+
+  if (!G) return;
+
+  /* 지나온 길 */
+  if (G.trail.length > 1){
+    cx.strokeStyle = exp; cx.lineWidth = Math.max(2.4, 3.2 * k * 8); cx.globalAlpha = .85;
+    cx.beginPath();
+    cx.moveTo(sx(NODES[G.trail[0]].x), sy(NODES[G.trail[0]].y));
+    for (var j = 1; j < G.trail.length; j++)
+      cx.lineTo(sx(NODES[G.trail[j]].x), sy(NODES[G.trail[j]].y));
+    cx.stroke(); cx.globalAlpha = 1;
+  }
+
+  /* 현재 갈림길의 선택지 */
+  if (G.pend && G.pend.opts){
+    cx.strokeStyle = roadHi; cx.lineWidth = Math.max(2, 2.6 * k * 8);
+    cx.setLineDash([6,5]);
+    G.pend.opts.forEach(function(w){
+      cx.beginPath();
+      cx.moveTo(sx(NODES[G.cur].x), sy(NODES[G.cur].y));
+      cx.lineTo(sx(NODES[w].x), sy(NODES[w].y));
+      cx.stroke();
+    });
+    cx.setLineDash([]);
+    G.pend.opts.forEach(function(w, i){
+      var px = sx(NODES[w].x), py = sy(NODES[w].y);
+      cx.fillStyle = surf; cx.strokeStyle = roadHi; cx.lineWidth = 2;
+      cx.beginPath(); cx.arc(px,py,13,0,6.2832); cx.fill(); cx.stroke();
+      cx.fillStyle = ink; cx.font = "600 13px 'IBM Plex Mono', monospace";
+      cx.textAlign = "center"; cx.textBaseline = "middle";
+      cx.fillText(String(i+1), px, py+.5);
+    });
+  }
+
+  function marker(idx, color, label){
+    if (idx == null) return;
+    var px = sx(NODES[idx].x), py = sy(NODES[idx].y);
+    cx.fillStyle = color; cx.beginPath(); cx.arc(px,py,8,0,6.2832); cx.fill();
+    cx.strokeStyle = surf; cx.lineWidth = 2.5; cx.stroke();
+    if (label){
+      cx.fillStyle = ink; cx.font = "600 11px 'IBM Plex Sans KR', sans-serif";
+      cx.textAlign = "center"; cx.textBaseline = "bottom";
+      cx.fillText(label, px, py - 11);
+    }
+  }
+  marker(G.goal, sha, "도착");
+  marker(G.cur, exp, "현재");
+  if (G.start != null && G.cur !== G.start) marker(G.start, cssVar("--muted"), null);
+}
+
+function nearestNode(mx, my){
+  var best = -1, bd = Infinity;
+  for (var i = 0; i < N; i++){
+    var dx = sx(NODES[i].x) - mx, dy = sy(NODES[i].y) - my;
+    var d = dx*dx + dy*dy;
+    if (d < bd){ bd = d; best = i; }
+  }
+  return best;
+}
+
+/* ---------- UI ---------- */
+var $ = function(id){ return document.getElementById(id); };
+function log(html){
+  var d = document.createElement("div"); d.innerHTML = html;
+  $("log").prepend(d);
+}
+function fmt(mins){
+  var s = Math.round(mins*60), m = Math.floor(s/60);
+  return String(m).padStart(2,"0") + ":" + String(s%60).padStart(2,"0");
+}
+function teamName(t){ return t === "exp" ? "원정대" : "쉐도우"; }
+
+/* 판을 넘겨 쌓이는 기록. 브라우저에만 남고 다른 기기와 공유되지 않는다. */
+var CKEY = "rsp.career.v1";
+function loadCareer(){
+  try {
+    var raw = localStorage.getItem(CKEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return {games:0, expWins:0, shaWins:0, rpsExp:0, rpsSha:0, junc:0};
+}
+var CAREER = loadCareer();
+function saveCareer(){
+  try { localStorage.setItem(CKEY, JSON.stringify(CAREER)); } catch (e) {}
+}
+function renderCareer(){
+  var c = CAREER, tot = c.rpsExp + c.rpsSha;
+  var pE = tot ? (100*c.rpsExp/tot).toFixed(1) + "%" : "–";
+  var pS = tot ? (100*c.rpsSha/tot).toFixed(1) + "%" : "–";
+  var gE = c.games ? (100*c.expWins/c.games).toFixed(0) + "%" : "–";
+  $("careerRows").innerHTML =
+    '<div class="row"><span class="k">플레이한 판</span><span class="v">' + c.games + '</span></div>' +
+    '<div class="row"><span class="k">게임 전적 (원정대 승률)</span><span class="v">' +
+      '<span style="color:var(--exp)">' + c.expWins + '</span> : ' +
+      '<span style="color:var(--sha)">' + c.shaWins + '</span>  ' + gE + '</span></div>' +
+    '<div class="row"><span class="k">가위바위보 누적</span><span class="v">' +
+      '<span style="color:var(--exp)">' + c.rpsExp + '</span> : ' +
+      '<span style="color:var(--sha)">' + c.rpsSha + '</span></span></div>' +
+    '<div class="row"><span class="k" style="color:var(--exp)">원정대 승률</span><span class="v">' + pE + '</span></div>' +
+    '<div class="row"><span class="k" style="color:var(--sha)">쉐도우 승률</span><span class="v">' + pS + '</span></div>' +
+    '<div class="row"><span class="k">누적 갈림길</span><span class="v">' + c.junc + '</span></div>';
+}
+
+function refresh(){
+  if (!G) return;
+  $("clock").textContent = fmt(G.t);
+  $("clock").classList.toggle("over", G.t > G.limit);
+  $("limitTxt").textContent = "제한 " + fmt(G.limit);
+  var pct = Math.min(100, G.t / G.limit * 100);
+  var bar = $("bar"); bar.style.width = pct + "%";
+  bar.className = pct >= 100 ? "over" : (pct >= 75 ? "warn" : "");
+  $("njunc").textContent = G.nJunc;
+  $("nsha").textContent = G.nSha;
+  var rw = G.rpsWin, tot = rw.exp + rw.sha;
+  $("rpsRec").innerHTML = '<span style="color:var(--exp)">' + rw.exp
+    + '</span> : <span style="color:var(--sha)">' + rw.sha + '</span>';
+  var theoE = G.cfg.nExp / (G.cfg.nExp + G.cfg.nSha) * 100, theoS = 100 - theoE;
+  $("rateExp").textContent = tot
+    ? (100 * rw.exp / tot).toFixed(1) + "% / " + theoE.toFixed(1) + "%"
+    : "– / " + theoE.toFixed(1) + "%";
+  $("rateSha").textContent = tot
+    ? (100 * rw.sha / tot).toFixed(1) + "% / " + theoS.toFixed(1) + "%"
+    : "– / " + theoS.toFixed(1) + "%";
+  $("cExp").textContent = G.cfg.nExp;
+  $("cSha").textContent = G.cfg.nSha;
+  $("mExp").textContent = G.cfg.myTeam === "exp" ? "내 팀 · 목적지 도달" : "목적지 도달";
+  $("mSha").textContent = G.cfg.myTeam === "sha" ? "내 팀 · 시간 끌기" : "시간 끌기";
+  $("remain").textContent = (G.dist && G.cur != null && isFinite(G.dist[G.cur]))
+    ? fmt(G.dist[G.cur]) : "–";
+
+  var names = {re:"재도전권", win:"무조건승리", sk:"스킵·직진"};
+  var rows = "";
+  ["re","win","sk"].forEach(function(k){
+    if (!G.items.exp[k] && !G.items.sha[k] &&
+        !G.cfg["i"+({re:"Re",win:"Win",sk:"Sk"})[k]+"E"] &&
+        !G.cfg["i"+({re:"Re",win:"Win",sk:"Sk"})[k]+"S"]) return;
+    rows += '<div class="row"><span class="k">'+names[k]+'</span><span class="v">'
+      + '<span style="color:var(--exp)">'+G.items.exp[k]+'</span> / '
+      + '<span style="color:var(--sha)">'+G.items.sha[k]+'</span></span></div>';
+  });
+  $("itemRows").innerHTML = rows || '<div class="row"><span class="k">아이템 없음</span></div>';
+
+  $("extBtn").disabled = !(G.phase !== "done" && !G.extUsed && G.t < 60 && G.cfg.nExp > 0);
+  $("extBtn").textContent = G.extUsed ? "연장권 사용됨 (90:00)" : "30분 연장권 사용";
+  renderCareer();
+  draw();
+}
+
+/* ---------- 게임 진행 ---------- */
+function setPanel(title, html){
+  $("jTitle").textContent = title;
+  $("jBody").innerHTML = html;
+}
+
+function begin(){
+  var cfg = {
+    nExp: Math.max(1, +$("nExp").value|0), nSha: Math.max(1, +$("nSha").value|0),
+    myTeam: $("myTeam").value,
+    iReE:+$("iReE").value|0, iReS:+$("iReS").value|0,
+    iWinE:+$("iWinE").value|0, iWinS:+$("iWinS").value|0,
+    iSkE:+$("iSkE").value|0, iSkS:+$("iSkS").value|0
+  };
+  G = freshGame(cfg);
+  $("log").innerHTML = "";
+  $("setupPanel").classList.add("hidden");
+  fitView(NODES.map(function(_,i){return i;}), 100);
+  $("hint").classList.remove("hidden");
+  $("hint").innerHTML = "지도에서 <b>출발 지점</b>을 누르세요";
+  setPanel("지점 선택", '<p class="note">출발과 도착을 차례로 누르세요. 도보 25~30분 거리가 권장 범위입니다.</p>');
+  log("<b>새 게임</b> · " + cfg.nExp + " : " + cfg.nSha + " · 내 팀 " + teamName(cfg.myTeam));
+  refresh();
+}
+
+function pickRandom(){
+  begin();
+  var tries = 0, a, b, d;
+  while (tries++ < 4000){
+    a = Math.floor(Math.random()*N);
+    d = shortestFrom(a);
+    var cands = [];
+    for (var i = 0; i < N; i++) if (d[i] >= 25 && d[i] <= 30) cands.push(i);
+    if (cands.length){ b = cands[Math.floor(Math.random()*cands.length)]; break; }
+  }
+  if (b == null){ log("무작위 배치 실패 — 직접 골라주세요"); return; }
+  /* begin() 직후에는 phase 가 pickStart 다. 출발지를 먼저 확정해 두지 않으면
+     onPick(b) 가 도착지를 출발지로 덮어쓴다. */
+  G.start = a; G.cur = a; G.phase = "pickGoal";
+  onPick(b);
+}
+
+cv.addEventListener("click", function(ev){
+  if (!G) return;
+  var r = cv.getBoundingClientRect();
+  var dpr = cv.width / r.width;
+  var mx = (ev.clientX - r.left) * dpr, my = (ev.clientY - r.top) * dpr;
+  if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(nearestNode(mx,my));
+  else if (G.phase === "chooseDir" && G.pend){
+    var n = nearestNode(mx,my);
+    if (G.pend.opts.indexOf(n) >= 0) chooseDir(n);
+  }
+});
+
+function onPick(n){
+  if (G.phase === "pickStart"){
+    G.start = n; G.phase = "pickGoal";
+    $("hint").innerHTML = "이제 <b>도착 지점</b>을 누르세요";
+    G.cur = n; refresh(); return;
+  }
+  if (n === G.start){ log("출발과 도착이 같습니다"); return; }
+  G.goal = n;
+  var d = shortestFrom(n);
+  if (!isFinite(d[G.start])){ log("두 지점이 이어져 있지 않습니다"); G.goal = null; return; }
+  G.dist = d;
+  $("hint").classList.add("hidden");
+  log("경로 설정 · 방해 없는 도보 <b>" + fmt(d[G.start]) + "</b>");
+  setPanel("준비", '<p class="note">AI 판단 기준을 계산하는 중…</p>');
+  refresh();
+  setTimeout(function(){
+    var pExp = G.cfg.nExp / (G.cfg.nExp + G.cfg.nSha);
+    var tR = 6.23 * SEC_PER_ROUND / 60;
+    G.V = solveV(G.goal, pExp, tR);
+    G.cur = G.start; G.prev = null; G.trail = [G.start];
+    fitView([G.start, G.goal], 700);
+    G.phase = "arrive"; step();
+  }, 30);
+}
+
+function valOf(cur, w){ return edgeW(cur,w) + G.V[stateIdx[cur + ">" + w]]; }
+
+function step(){
+  if (G.cur === G.goal){ finish(true); return; }
+  if (G.t > G.limit){ finish(false); return; }
+  var opts = optionsOf(G.prev, G.cur);
+  if (!opts.length){ finish(false); return; }
+  if (opts.length === 1){ move(opts[0], "외길"); return; }
+
+  G.nJunc++;
+  var vals = opts.map(function(w){ return {w:w, v:valOf(G.cur,w)}; });
+  vals.sort(function(a,b){ return a.v - b.v; });
+  var best = vals[0], worst = vals[vals.length-1];
+  G.pend = {opts: opts, best: best.w, worst: worst.w, delta: worst.v - best.v};
+  G.phase = "declare";
+  declarePhase();
+}
+
+function declarePhase(){
+  var p = G.pend, my = G.cfg.myTeam, opp = my === "exp" ? "sha" : "exp";
+  var hot = p.delta >= 40;
+
+  /* AI 쪽 선언 (내 팀이 아닌 쪽) */
+  p.aiWin = G.items[opp].win > 0 && hot;
+  var straightW = straightOption();
+  p.aiSkip = !p.aiWin && G.items[opp].sk > 0 && hot &&
+             straightW === (opp === "exp" ? p.best : p.worst);
+
+  var canWin = G.items[my].win > 0, canSk = G.items[my].sk > 0 &&
+               straightOption() === (my === "exp" ? p.best : p.worst);
+  var html = '<p style="margin:0 0 9px">갈림길 ' + p.opts.length + '갈래 · '
+    + '여기서 지면 <b>' + p.delta.toFixed(1) + '분</b> 손해</p>';
+  var btns = '<div class="btnrow">';
+  if (canWin) btns += '<button id="useWin">무조건승리 (' + G.items[my].win + ')</button>';
+  if (canSk)  btns += '<button id="useSk">스킵·직진 (' + G.items[my].sk + ')</button>';
+  btns += '<button class="primary" id="goRps">가위바위보</button></div>';
+  setPanel("갈림길 " + G.nJunc, html + btns);
+  if (canWin) $("useWin").onclick = function(){ useWin(my); };
+  if (canSk)  $("useSk").onclick  = function(){ useSkip(my); };
+  $("goRps").onclick = function(){ resolveDeclarations(false, false); };
+  refresh();
+}
+
+function straightOption(){
+  if (G.prev == null) return null;
+  var hx = NODES[G.cur].x - NODES[G.prev].x, hy = NODES[G.cur].y - NODES[G.prev].y;
+  var h = Math.atan2(hy, hx), best = null, bd = 9e9;
+  G.pend.opts.forEach(function(w){
+    var a = Math.atan2(NODES[w].y - NODES[G.cur].y, NODES[w].x - NODES[G.cur].x);
+    var d = Math.abs(((a - h + Math.PI) % (2*Math.PI) + 2*Math.PI) % (2*Math.PI) - Math.PI);
+    if (d < bd){ bd = d; best = w; }
+  });
+  return best;
+}
+
+function useWin(team){ resolveDeclarations(team === G.cfg.myTeam ? true : false, false, team); }
+function useSkip(team){
+  G.items[team].sk--;
+  var w = straightOption();
+  log('<span class="'+(team==="exp"?"e":"s")+'">'+teamName(team)+'</span> 스킵·직진 사용');
+  move(w, "직진");
+}
+
+function resolveDeclarations(myWin, mySkip, whoWin){
+  var p = G.pend, my = G.cfg.myTeam, opp = my === "exp" ? "sha" : "exp";
+  var eWin = (whoWin === my) || false, oWin = p.aiWin;
+
+  if (eWin && oWin){
+    /* 동시 선언 -> 전원 가위바위보로 사용권 결정. 진 쪽은 개수 유지 */
+    var w = quickRps();
+    log("양 팀 무조건승리 동시 선언 → 사용권 <b>" + teamName(w) + "</b>");
+    if (w === my) oWin = false; else eWin = false;
+  }
+  if (eWin){ G.items[my].win--; log('<span class="'+(my==="exp"?"e":"s")+'">'+teamName(my)+'</span> 무조건승리 사용');
+             takeDir(my); return; }
+  if (oWin){ G.items[opp].win--; log('<span class="'+(opp==="exp"?"e":"s")+'">'+teamName(opp)+'</span> 무조건승리 사용');
+             takeDir(opp); return; }
+  if (p.aiSkip){ useSkip(opp); return; }
+  startRps();
+}
+
+function quickRps(){
+  var n = G.cfg.nExp + G.cfg.nSha, alive = [];
+  for (var i = 0; i < n; i++) alive.push(i);
+  var guard = 0;
+  while (alive.length > 1 && guard++ < 500){
+    var ts = alive.map(function(){ return Math.floor(Math.random()*3); });
+    var ws = winnerSymbol(ts);
+    if (ws === null) continue;
+    alive = alive.filter(function(_,i){ return ts[i] === ws; });
+  }
+  return alive[0] < G.cfg.nExp ? "exp" : "sha";
+}
+
+/* 플레이어 0..nExp-1 = 원정대, 그 뒤 = 쉐도우. 사람은 내 팀의 첫 번째 슬롯. */
+function myIndex(){ return G.cfg.myTeam === "exp" ? 0 : G.cfg.nExp; }
+function teamOf(i){ return i < G.cfg.nExp ? "exp" : "sha"; }
+
+function startRps(){
+  var n = G.cfg.nExp + G.cfg.nSha;
+  G.alive = []; for (var i = 0; i < n; i++) G.alive.push(i);
+  G.round = 0; G.phase = "rps";
+  rpsPrompt();
+}
+
+function aliveSplit(){
+  var e = 0, s = 0;
+  G.alive.forEach(function(i){ if (teamOf(i) === "exp") e++; else s++; });
+  return {e:e, s:s};
+}
+
+function rpsPrompt(){
+  /* 한 팀이 전멸하면 남은 팀의 승리. 같은 팀끼리 더 겨룰 이유가 없다.
+     끝까지 갔을 때 최후 1인이 나왔을 팀과 결과가 같고(검증: 4:2 에서
+     33.36% vs 33.38%), 라운드만 6.22 -> 5.64 로 줄어든다. */
+  var at = aliveSplit();
+  if (at.e === 0 || at.s === 0){ rpsDone(); return; }
+  var me = myIndex(), iAmIn = G.alive.indexOf(me) >= 0;
+  var html = '<p style="margin:0 0 8px">' + G.round + '라운드 진행 · 남은 인원 <b>'
+    + G.alive.length + '명</b></p>' + renderThrows();
+  if (iAmIn){
+    html += '<div class="btnrow" style="margin-top:8px">'
+      + HAND.map(function(h,i){ return '<button data-h="'+i+'" class="h">'+h+'</button>'; }).join("")
+      + '</div>';
+  } else {
+    html += '<div class="btnrow" style="margin-top:8px"><button class="primary" id="nextR">계속</button></div>';
+  }
+  setPanel("가위바위보", html);
+  if (iAmIn){
+    Array.prototype.forEach.call(document.querySelectorAll("button.h"), function(b){
+      b.onclick = function(){ rpsRound(+b.dataset.h); };
+    });
+  } else {
+    $("nextR").onclick = function(){ rpsRound(null); };
+  }
+  refresh();
+}
+
+function renderThrows(){
+  if (!G.throws) return "";
+  var out = '<div class="throws">';
+  G.throws.forEach(function(t){
+    out += '<span class="chip ' + teamOf(t.i) + (t.out ? " out" : "") + '">'
+      + (t.i === myIndex() ? "나" : teamName(teamOf(t.i)).slice(0,2) + (t.i+1))
+      + ' <span class="hand">' + HAND[t.h] + '</span></span>';
+  });
+  return out + "</div>";
+}
+
+function rpsRound(myHand){
+  G.round++;
+  G.t += SEC_PER_ROUND / 60;
+  var me = myIndex();
+  var ts = G.alive.map(function(i){
+    return (i === me && myHand !== null) ? myHand : Math.floor(Math.random()*3);
+  });
+  var ws = winnerSymbol(ts);
+  G.throws = G.alive.map(function(i, k){
+    return {i:i, h:ts[k], out: ws !== null && ts[k] !== ws};
+  });
+  if (ws === null){
+    log("무승부 (" + G.alive.length + "명)");
+  } else {
+    G.alive = G.alive.filter(function(_, k){ return ts[k] === ws; });
+  }
+  rpsPrompt();
+}
+
+function rpsDone(){
+  var wt = teamOf(G.alive[0]);   /* 남은 인원은 전부 같은 팀 */
+  G.rpsWin[wt]++;
+  CAREER[wt === 'exp' ? 'rpsExp' : 'rpsSha']++; saveCareer(); renderCareer();
+  var my = G.cfg.myTeam, opp = my === "exp" ? "sha" : "exp";
+  var loser = wt === "exp" ? "sha" : "exp";
+  log('가위바위보 <b>' + teamName(wt) + '</b> 승 (' + G.round + '라운드, ' + G.alive.length + '명 생존)');
+
+  /* 재도전권 — 진 쪽이 쓸 수 있다. 갈림길당 1회. */
+  if (!G.pend.retried && G.items[loser].re > 0 && G.pend.delta >= (loser === opp ? 40 : 0)){
+    if (loser === my){
+      var html = '<p style="margin:0 0 8px">졌습니다 · 이 갈림길 손해 <b>'
+        + G.pend.delta.toFixed(1) + '분</b></p>' + renderThrows()
+        + '<div class="btnrow" style="margin-top:8px">'
+        + '<button class="primary" id="doRe">재도전권 사용 (' + G.items[my].re + ')</button>'
+        + '<button id="skipRe">그냥 간다</button></div>';
+      setPanel("재도전?", html);
+      $("doRe").onclick = function(){
+        G.items[my].re--; G.pend.retried = true;
+        log('<span class="'+(my==="exp"?"e":"s")+'">'+teamName(my)+'</span> 재도전권 사용');
+        startRps();
+      };
+      $("skipRe").onclick = function(){ takeDir(wt); };
+      refresh();
+      return;
+    }
+    /* AI 가 진 경우 */
+    G.items[loser].re--; G.pend.retried = true;
+    log('<span class="'+(loser==="exp"?"e":"s")+'">'+teamName(loser)+'</span> 재도전권 사용');
+    startRps();
+    return;
+  }
+  takeDir(wt);
+}
+
+function takeDir(team){
+  var p = G.pend;
+  if (team === G.cfg.myTeam){
+    G.phase = "chooseDir";
+    var list = p.opts.map(function(w,i){
+      return '<button data-w="'+w+'" class="d">'+(i+1)+'번 · '
+        + fmt(edgeW(G.cur,w)) + ' 걷기</button>';
+    }).join("");
+    setPanel("방향 선택 (내 팀 승)",
+      '<p style="margin:0 0 8px">지도의 번호를 누르거나 아래에서 고르세요</p>'
+      + '<div class="btnrow">' + list + '</div>');
+    Array.prototype.forEach.call(document.querySelectorAll("button.d"), function(b){
+      b.onclick = function(){ chooseDir(+b.dataset.w); };
+    });
+    refresh();
+    return;
+  }
+  var pick = team === "exp" ? p.best : p.worst;
+  if (team === "sha") G.nSha++;
+  log('<span class="'+(team==="exp"?"e":"s")+'">'+teamName(team)+'</span>가 방향 결정');
+  move(pick, null);
+}
+
+function chooseDir(w){
+  if (G.cfg.myTeam === "sha") G.nSha++;
+  move(w, null);
+}
+
+function move(w, why){
+  G.t += edgeW(G.cur, w);
+  G.prev = G.cur; G.cur = w; G.trail.push(w);
+  G.pend = null; G.throws = null;
+  if (why) log(why + " · " + fmt(edgeW(G.prev, w)) + " 이동");
+  fitView(G.trail.concat([G.goal]), 500);
+  refresh();
+  setTimeout(step, 120);
+}
+
+function finish(arrived){
+  G.phase = "done";
+  var expWin = arrived && G.t <= G.limit;
+  if (!G.counted){
+    G.counted = true;
+    CAREER.games++; CAREER.junc += G.nJunc;
+    if (expWin) CAREER.expWins++; else CAREER.shaWins++;
+    saveCareer(); renderCareer();
+  }
+  var mine = (G.cfg.myTeam === "exp") === expWin;
+  var msg = expWin
+    ? "원정대 도착 · " + fmt(G.t)
+    : (arrived ? "시간 초과 도착 · " + fmt(G.t) : "제한시간 초과 — 쉐도우 승");
+  setPanel("결과",
+    '<div class="verdict ' + (mine ? "win" : "lose") + '">'
+    + (mine ? "내 팀 승리" : "내 팀 패배") + ' · ' + msg + '</div>'
+    + '<p class="note">갈림길 ' + G.nJunc + '개 · 쉐도우가 ' + G.nSha + '번 이겼습니다.</p>'
+    + '<div class="btnrow" style="margin-top:10px">'
+    + '<button class="primary" id="again">새 게임</button></div>');
+  $("again").onclick = function(){ $("setupPanel").classList.remove("hidden"); begin(); };
+  log("<b>종료</b> · " + msg);
+  refresh();
+}
+
+/* ---------- 부팅 ---------- */
+$("resetCareer").onclick = function(){
+  CAREER = {games:0, expWins:0, shaWins:0, rpsExp:0, rpsSha:0, junc:0};
+  saveCareer(); renderCareer(); log("누적 기록 초기화");
+};
+renderCareer();
+$("startBtn").onclick = begin;
+$("randBtn").onclick = pickRandom;
+$("extBtn").onclick = function(){
+  if (!G || G.extUsed || G.t >= 60) return;
+  G.extUsed = true; G.limit = 90;
+  log("<b>30분 연장권 사용</b> → 제한 90:00");
+  refresh();
+};
+window.addEventListener("resize", function(){ sizeCanvas(); draw(); });
+sizeCanvas();
+fitView(NODES.map(function(_,i){return i;}), 100);
+draw();
+setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 재도전권 1:1 은 공릉 24개 루트에서 중앙값 49.7%가 나온 구성입니다.</p>');
+})();
+</script>

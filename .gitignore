@@ -1,0 +1,12 @@
+# OSM 원본 캐시 — 수십 MB 씩이고 언제든 재다운로드 가능
+data/
+_env_setup.log
+
+# conda/파이썬 부산물
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+cache/
+
+# 빌드 산출물 중 아트팩트용 사본 (docs/index.html 이 정본)
+web/game.html
