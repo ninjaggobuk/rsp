@@ -1239,16 +1239,26 @@ function pushSetup(){
   if (FB.mode === "host" && FB.ref) FB.ref.child("setup").set(readSetup());
 }
 
-function playersToMap(){
-  var m = {};
-  PLAYERS.forEach(function(p){ m[p.id] = {name: p.name, team: p.team, bot: !!p.bot}; });
-  return m;
+/* 규칙이 players/$uid 단위로만 쓰기를 허용하므로 부모를 통째로 set 하면
+   PERMISSION_DENIED 가 난다. 경로별 multi-path update 로 쓴다 — 원자적이고
+   각 경로가 자기 규칙으로 평가된다. 사라진 사람은 null 로 지운다. */
+function writePlayers(){
+  if (!FB.ref || FB.mode === "local") return Promise.resolve();
+  var u = {}, base = "rooms/" + FB.room + "/players/";
+  var have = {};
+  PLAYERS.forEach(function(p){
+    have[p.id] = 1;
+    u[base + p.id] = {name: p.name, team: p.team, bot: !!p.bot};
+  });
+  (FB.serverIds || []).forEach(function(id){ if (!have[id]) u[base + id] = null; });
+  return FB.db.ref().update(u);
 }
 
 function subscribeRoom(){
   FB.ref.child("players").on("value", function(sn){
     var v = sn.val() || {};
-    PLAYERS = Object.keys(v).map(function(k){
+    FB.serverIds = Object.keys(v);
+    PLAYERS = FB.serverIds.map(function(k){
       return {id: k, name: v[k].name, team: v[k].team, bot: !!v[k].bot};
     });
     renderLobby();
@@ -1296,14 +1306,18 @@ function createRoom(){
     /* 내 슬롯의 id 를 익명 uid 로 갈아끼운다 */
     PLAYERS.forEach(function(p){ if (p.id === MYID) p.id = FB.uid; });
     MYID = FB.uid;
-    return FB.ref.set({
-      meta: {host: FB.uid, phase: "lobby", createdAt: firebase.database.ServerValue.TIMESTAMP},
-      players: playersToMap(),
-      setup: readSetup()
+    /* players 규칙이 meta/host 를 참조하므로 meta 를 먼저 써야 한다 */
+    return FB.ref.child("meta").set({
+      host: FB.uid, phase: "lobby",
+      createdAt: firebase.database.ServerValue.TIMESTAMP
     });
   }).then(function(){
     FB.mode = "host";
     NET.setMode("host");
+    return FB.ref.child("setup").set(readSetup());
+  }).then(function(){
+    return writePlayers();
+  }).then(function(){
     subscribeRoom();
     roomMsg("방 " + FB.room + " 개설. 이 코드를 팀원에게 알려주세요.");
   }).catch(function(e){
@@ -1339,7 +1353,7 @@ function joinRoom(){
 /* 로비 변경을 서버에 반영한다. 방장은 전원을, 참가자는 자기 자신만 바꾼다. */
 function lobbyChanged(who){
   if (FB.mode === "local" || !FB.ref) return;
-  if (FB.mode === "host"){ FB.ref.child("players").set(playersToMap()); return; }
+  if (FB.mode === "host"){ writePlayers(); return; }
   if (who && who === MYID){
     var me = PLAYERS.filter(function(p){ return p.id === MYID; })[0];
     if (me) FB.ref.child("players/" + MYID).set({name: me.name, team: me.team, bot: false});
