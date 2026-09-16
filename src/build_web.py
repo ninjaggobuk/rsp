@@ -11,6 +11,7 @@ JSON 을 파일로 분리해 두는 이유: 71 KB 짜리 좌표 덩어리를 템
 
     python src/build_web.py
 """
+import hashlib
 import io
 import os
 import re
@@ -47,6 +48,13 @@ def main():
             raise SystemExit("템플릿에 죽은 참조가 남아 있다: %s" % dead)
 
     body = tpl.replace("__MAP_JSON__", mj)
+
+    # config.js 는 index.html 과 따로 캐시된다. 내용 해시를 붙여야 키를 바꿨을 때
+    # 브라우저가 옛 파일을 계속 쓰지 않는다 (2026-09-17 에 이걸로 한참 헤맸다).
+    cfg_path = os.path.join(ROOT, "docs", "config.js")
+    if os.path.exists(cfg_path):
+        h = hashlib.sha1(io.open(cfg_path, "rb").read()).hexdigest()[:8]
+        body = body.replace('src="config.js"', 'src="config.js?v=%s"' % h)
 
     # 아트팩트는 게시 시 doctype/head/body 를 씌워주지만 GitHub Pages 는 파일을
     # 그대로 서빙한다. 껍데기가 없으면 quirks 모드로 뜬다.
