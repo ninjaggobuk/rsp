@@ -396,24 +396,33 @@ function freshGame(cfg){
    GitHub Pages 전용이다. 카카오/네이버/구글은 각자 다른 SDK 라 타일 주소만
    바꾸는 걸로는 안 되고, 사장님 계정으로 발급한 키가 있어야 붙일 수 있다. */
 var MAP = null, GRAPH_LINE = null, TRAIL_LINE = null, TILE = null;
-var MARKS = null, OPTS = null;
+var MARKS = null, OPTS = null, ROAD_COLOR = null;
+function roadColor(){ return ROAD_COLOR || cssVar("--road-hi"); }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
+/* 키 없이 쓸 수 있는 타일만 둔다. CARTO 는 브라우저 Referer 를 보고
+   "API KEY REQUIRED" 타일을 돌려주므로 뺐다(curl 로는 200 이라 헷갈린다).
+   카카오/네이버/구글은 각자 SDK + 사장님 계정 키가 필요해 아직 없다. */
 var PROVIDERS = {
   osm: {
-    name: "OpenStreetMap",
-    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자'
+    name: "일반 지도",
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자',
+    road: null            // 테마 색 그대로
   },
-  light: {
-    name: "밝은 지도",
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attr: '&copy; OpenStreetMap 기여자, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  sat: {
+    name: "위성 사진",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attr: 'Tiles &copy; Esri — Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, '
+        + 'Aerogrid, IGN, IGP, UPR-EGP, GIS User Community',
+    road: "#FFD54A"       // 위성 위에서는 어두운 선이 안 보인다
   },
-  dark: {
-    name: "어두운 지도",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attr: '&copy; OpenStreetMap 기여자, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  topo: {
+    name: "지형 지도",
+    url: "https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png",
+    attr: '지도 데이터 &copy; OpenStreetMap 기여자, SRTM | 스타일 &copy; '
+        + '<a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)',
+    road: "#C2185B"
   }
 };
 
@@ -429,13 +438,18 @@ function setProvider(key){
   if (TILE) MAP.removeLayer(TILE);
   TILE = L.tileLayer(p.url, {maxZoom: 19, attribution: p.attr, subdomains: "abc"}).addTo(MAP);
   TILE.setZIndex(0);
+  ROAD_COLOR = p.road;
+  if (GRAPH_LINE) GRAPH_LINE.setStyle({color: roadColor(), opacity: p.road ? 0.75 : 0.5});
   try { localStorage.setItem("rsp.provider", key); } catch (e) {}
 }
 
 function initMap(){
   MAP = L.map("map", {preferCanvas: true, zoomControl: true});
   var saved = "osm";
-  try { saved = localStorage.getItem("rsp.provider") || (prefersDark() ? "dark" : "osm"); } catch (e) {}
+  try {
+    var v = localStorage.getItem("rsp.provider");
+    if (v && PROVIDERS[v]) saved = v;      // 없어진 공급자면 기본으로 되돌린다
+  } catch (e) {}
   var sel = $("provider");
   Object.keys(PROVIDERS).forEach(function(k){
     var o = document.createElement("option");
@@ -451,7 +465,7 @@ function initMap(){
     return [[NODES[e[0]].lat, NODES[e[0]].lon], [NODES[e[1]].lat, NODES[e[1]].lon]];
   });
   GRAPH_LINE = L.polyline(segs, {
-    color: cssVar("--road-hi"), weight: 1.6, opacity: 0.5, interactive: false
+    color: roadColor(), weight: 1.6, opacity: 0.5, interactive: false
   }).addTo(MAP);
 
   TRAIL_LINE = L.polyline([], {color: cssVar("--exp"), weight: 5, opacity: 0.85, interactive: false}).addTo(MAP);
@@ -518,7 +532,7 @@ function draw(){
   if (!MAP || !G) return;
   TRAIL_LINE.setLatLngs(G.trail.map(ll));
   TRAIL_LINE.setStyle({color: cssVar("--exp")});
-  GRAPH_LINE.setStyle({color: cssVar("--road-hi")});
+  GRAPH_LINE.setStyle({color: roadColor()});
 
   MARKS.clearLayers();
   if (G.goal != null) pin(G.goal, cssVar("--sha"), "도착").addTo(MARKS);
