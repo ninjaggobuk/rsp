@@ -99,6 +99,7 @@ def district_graph(fname):
         if not S.has_edge(u, v) or w < S[u][v]["w"]:
             S.add_edge(u, v, w=w)
     pos = {n: (d["x"], d["y"]) for n, d in Gc.nodes(data=True)}
+    si.POS = pos          # options() 의 방향 묶기에 쓰인다
     return Gc, S, pos
 
 

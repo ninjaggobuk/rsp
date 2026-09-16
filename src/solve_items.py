@@ -88,12 +88,52 @@ def build():
     start = nearest_nodes(Gc, pts.geometry[0].x, pts.geometry[0].y)
     goal = nearest_nodes(Gc, pts.geometry[1].x, pts.geometry[1].y)
     S = S.subgraph(nx.node_connected_component(S, goal)).copy()
+    globals()['POS'] = pos
     return S, pos, start, goal
 
 
+BEARING_BUCKET = 25.0     # 이 각도 안이면 '같은 방향'으로 본다
+POS = None                # 현재 그래프의 노드 좌표 (build 계열이 채운다)
+
+
 def options(S, prev, cur):
+    """갈림길에서 고를 수 있는 '방향' 목록.
+
+    ★ OSM 엣지를 그대로 세면 안 된다. 교차로 병합 때문에 역 일대가 한 점이
+      되면서 엣지가 34개까지 붙는데(2026-09-17 실측), 실제로는 동/서/남/북 +
+      골목 몇 개일 뿐이다. 사장님 규칙도 "직진 횡단보도 1, 우측 횡단보도 1,
+      좌측 보도 1 = 3갈래"처럼 **방향**으로 센다.
+
+    그래서 방위각 BEARING_BUCKET 안에 있는 길들을 한 묶음으로 보고, 각 묶음에서
+    **가장 짧은 길**을 대표로 내보낸다(그 방향으로 가는 가장 직접적인 길).
+    25도로 묶으면 최대 8갈래가 되고 9갈래 이상은 사라진다.
+    """
     opts = [w for w in S[cur] if w != prev]
-    return opts if opts else ([prev] if prev is not None else [])
+    if not opts:
+        return [prev] if prev is not None else []
+    if POS is None or len(opts) <= 2:
+        return opts
+
+    items = []
+    for w in opts:
+        a = math.degrees(math.atan2(POS[w][1] - POS[cur][1],
+                                    POS[w][0] - POS[cur][0])) % 360.0
+        items.append((a, S[cur][w]["w"], w))
+    items.sort()
+
+    groups, g = [], [items[0]]
+    for it in items[1:]:
+        if it[0] - g[-1][0] <= BEARING_BUCKET:
+            g.append(it)
+        else:
+            groups.append(g); g = [it]
+    groups.append(g)
+    # 0도 경계를 사이에 둔 두 묶음은 하나다
+    if len(groups) > 1 and (360.0 - groups[-1][-1][0]) + groups[0][0][0] <= BEARING_BUCKET:
+        groups[0] = groups[-1] + groups[0]
+        groups.pop()
+
+    return [min(gr, key=lambda t: t[1])[2] for gr in groups]
 
 
 def solve(S, goal, t_rps=T_RPS_NOM, p_shadow=P_SHADOW):
