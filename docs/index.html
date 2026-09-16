@@ -137,6 +137,8 @@ button.tab.on{background:var(--exp); border-color:var(--exp); color:#fff}
 .prow{display:flex; align-items:center; gap:5px; background:var(--surface);
       border:1px solid var(--hair); border-radius:6px; padding:3px 4px 3px 8px; font-size:12px}
 .prow.me{border-color:var(--exp)}
+.prow.off{opacity:.45}
+.prow.off .pname::after{content:" (접속 끊김)"; color:var(--muted); font-size:11px}
 .pname{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 button.tiny{padding:1px 6px; font-size:12px; line-height:1.5; border-radius:5px}
 button.addbot{width:100%; margin-top:7px; font-size:12px; padding:5px 8px; background:transparent;
@@ -975,7 +977,7 @@ function renderLobby(){
     box.innerHTML = "";
     PLAYERS.filter(function(p){ return p.team === t; }).forEach(function(p){
       var row = document.createElement("div");
-      row.className = "prow" + (p.id === MYID ? " me" : "");
+      row.className = "prow" + (p.id === MYID ? " me" : "") + (p.off ? " off" : "");
       var nm = document.createElement("span");
       nm.className = "pname";
       nm.textContent = (p.bot ? "AI " : "") + p.name;
@@ -1115,7 +1117,7 @@ var NET = (function(){
     on: on,
     emit: emit,
     mode: function(){ return mode; },
-    setMode: function(m){ mode = m; uid = (window.FB && FB.uid) || uid; },
+    setMode: function(m){ mode = m; uid = (FB && FB.uid) || uid; },
     uid: function(){ return uid; },
     room: function(){ return room; },
     isHost: function(){ return mode !== "guest"; },
@@ -1142,7 +1144,7 @@ var NET = (function(){
     chat: function(scope, text){
       text = String(text || "").trim();
       if (!text) return;
-      if (mode !== "local" && window.FB && FB.ref){
+      if (mode !== "local" && FB && FB.ref){
         FB.ref.child("chat/" + scope).push(
           {uid: FB.uid, name: myNick(), text: text, at: Date.now()});
         return;                       /* 수신은 구독으로 돌아온다 */
@@ -1248,7 +1250,10 @@ function writePlayers(){
   var have = {};
   PLAYERS.forEach(function(p){
     have[p.id] = 1;
-    u[base + p.id] = {name: p.name, team: p.team, bot: !!p.bot};
+    /* 필드 단위로 써야 남의 online 플래그를 덮지 않는다 */
+    u[base + p.id + "/name"] = p.name;
+    u[base + p.id + "/team"] = p.team;
+    u[base + p.id + "/bot"] = !!p.bot;
   });
   (FB.serverIds || []).forEach(function(id){ if (!have[id]) u[base + id] = null; });
   return FB.db.ref().update(u);
@@ -1259,7 +1264,8 @@ function subscribeRoom(){
     var v = sn.val() || {};
     FB.serverIds = Object.keys(v);
     PLAYERS = FB.serverIds.map(function(k){
-      return {id: k, name: v[k].name, team: v[k].team, bot: !!v[k].bot};
+      return {id: k, name: v[k].name, team: v[k].team, bot: !!v[k].bot,
+              off: (v[k].online === false && !v[k].bot)};
     });
     renderLobby();
   });
@@ -1273,7 +1279,15 @@ function subscribeRoom(){
       renderChat();
     });
   });
-  FB.ref.child("players/" + FB.uid).onDisconnect().remove();
+  /* remove() 로 두면 탭을 잠깐 뒤로 보내거나 폰이 잠겨도 방에서 사라진다
+     (2026-09-17 실측: 방장이 목록에서 통째로 지워졌다). online 플래그만 내리고,
+     .info/connected 로 다시 붙을 때마다 스스로 복구한다. */
+  var meRef = FB.ref.child("players/" + FB.uid);
+  FB.db.ref(".info/connected").on("value", function(sn){
+    if (sn.val() !== true) return;
+    meRef.onDisconnect().update({online: false});
+    meRef.update({online: true});
+  });
   updateRoomUI();
 }
 
