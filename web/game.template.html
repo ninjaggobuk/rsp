@@ -501,7 +501,10 @@ function freshGame(cfg){
    바꾸는 걸로는 안 되고, 사장님 계정으로 발급한 키가 있어야 붙일 수 있다. */
 var MAP = null, GRAPH_LINE = null, TRAIL_LINE = null, TILE = null;
 var MARKS = null, OPTS = null, ROAD_COLOR = null;
-function roadColor(){ return ROAD_COLOR || cssVar("--road-hi"); }
+/* 실제 지도 타일 위에서는 얇은 회색 선이 배경에 묻힌다(2026-09-17 실측:
+   33,669 px 이 그려졌는데도 눈에 안 보였다). 타일 위에서는 전용 색을 쓴다. */
+var ROAD_ON_TILE = "#1565C0";      /* 진한 파랑 — 도로·건물색과 안 겹친다 */
+function roadColor(){ return ROAD_COLOR || ROAD_ON_TILE; }
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
 /* 키 없이 쓸 수 있는 타일만 둔다. CARTO 는 브라우저 Referer 를 보고
@@ -512,14 +515,14 @@ var PROVIDERS = {
     name: "일반 지도",
     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
     attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자',
-    road: null            // 테마 색 그대로
+    road: null            // 기본 타일색 -> ROAD_ON_TILE 사용
   },
   sat: {
     name: "위성 사진",
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attr: 'Tiles &copy; Esri — Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, '
         + 'Aerogrid, IGN, IGP, UPR-EGP, GIS User Community',
-    road: "#FFD54A"       // 위성 위에서는 어두운 선이 안 보인다
+    road: "#FFD54A"       // 위성 위에서는 밝은 선이어야 보인다
   },
   topo: {
     name: "지형 지도",
@@ -577,7 +580,7 @@ function initMap(){
   /* 보행망 전체를 한 겹으로. 엣지마다 레이어를 만들면 1357개라 느려진다. */
   var segs = EGEO.map(function(g){ return g.pts; });
   GRAPH_LINE = L.polyline(segs, {
-    color: roadColor(), weight: 1.6, opacity: 0.5, interactive: false
+    color: roadColor(), weight: 2.4, opacity: 0.6, interactive: false
   }).addTo(MAP);
 
   TRAIL_LINE = L.polyline([], {color: cssVar("--exp"), weight: 5, opacity: 0.85, interactive: false}).addTo(MAP);
@@ -759,8 +762,9 @@ function kDraw(){
 
   /* 보행망 */
   KCX.strokeStyle = roadColor();
-  KCX.lineWidth = 1.6;
-  KCX.globalAlpha = 0.75;
+  KCX.lineWidth = 2.4;
+  KCX.lineJoin = "round";
+  KCX.globalAlpha = 0.6;
   /* 좌표점이 1만 개라 화면 밖 엣지는 bbox 로 먼저 걸러낸다 */
   var vb = KMAP.getBounds();
   var sw = vb.getSouthWest(), ne = vb.getNorthEast();
