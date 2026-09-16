@@ -6,7 +6,18 @@
 > 두 팀은 한 덩어리로 움직이고, 갈림길마다 전원이 가위바위보를 해서
 > **상대 팀이 전멸하면** 그 팀이 방향을 정한다. 횡단보도도 갈림길로 센다.
 
-🎮 **[브라우저에서 플레이](https://ninjaggobuk.github.io/rsp/)**
+🎮 **[브라우저에서 플레이](https://ninjaggobuk.github.io/rsp/)** — 계정 없이 바로 열립니다
+
+| | |
+|---|---|
+| 지도 | 일반(OSM) · 위성(Esri) · 지형 · **카카오맵** |
+| 로비 | 최대 10명, 진영 간 이동, AI 봇 추가, 닉네임 |
+| 아이템 | 팀별 분배 + 사용 투표(만장일치 / 과반 / 방장 / 없음) |
+| 채팅 | 전체 · 팀 (팀 채팅은 시작 후) |
+| AI 쉐도우 | 가치반복을 브라우저에서 직접 돌려 실제로 최악의 길을 고른다 |
+
+멀티플레이(방 코드·실시간 동기화) 설계는 [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md).
+통신 경계(`NET`)는 이미 들어가 있고 지금은 로컬 모드로 돈다.
 
 ---
 
@@ -101,6 +112,15 @@ conda create -n rsp -c conda-forge -y python=3.12 osmnx matplotlib networkx scip
 | `src/route_features.py` | 난이도를 예측하는 지형 특징 탐색 (결과: 실패) |
 | `src/export_map.py` · `build_web.py` | 브라우저판 빌드 |
 | `web/game.template.html` | 게임 원본 (지도 데이터는 빌드 시 주입) |
+| `docs/index.html` | 빌드 결과 — GitHub Pages 가 서빙한다 |
+| `docs/config.js` | 지도·Firebase 키. 재빌드 없이 바꿀 수 있다 |
+
+### 키에 대해
+
+`docs/config.js` 의 카카오 **JavaScript 키**는 페이지 소스에 그대로 실리는 공개
+식별자다. 보안은 카카오 콘솔의 **도메인 제한**으로 건다 — 다른 도메인에서는
+쓸 수 없다. REST API 키와 Admin 키는 진짜 비밀이므로 여기 넣지 않는다.
+Firebase 웹 설정도 같은 성격이고, 보안은 Realtime Database 규칙으로 건다.
 
 ## 모델의 한계
 
