@@ -63,9 +63,55 @@ def main():
             "lon": round(pts.geometry[i].x, 6),
         })
 
-    out_edges = []
+    # ★ 엣지의 실제 도로 모양(geometry)을 같이 내보낸다.
+    #   교차로를 25 m 로 병합했기 때문에, 양 끝점만 직선으로 이으면 굽은 길이
+    #   펴져서 실제 지도 위에서 건물을 가로지른다(2026-09-17 사장님 지적).
+    #   게임 로직은 노드/가중치만 쓰고, geom 은 그리기 전용이다.
+    geoms = {}
+    for u, v, d in nx.MultiGraph(Gc).edges(data=True):
+        if u == v or not S.has_edge(u, v):
+            continue
+        w = d.get("length", 0.0) / 1000.0 / si.WALK_KMH * 60.0
+        key = (min(u, v), max(u, v))
+        # S 에 남긴 것은 최단 평행엣지다. 같은 것을 골라야 모양이 맞는다.
+        if abs(w - S[u][v]["w"]) < 1e-9 and key not in geoms:
+            geoms[key] = (u, v, d.get("geometry"))
+
+    # 투영좌표 -> 위경도 일괄 변환
+    lines, keys = [], []
+    for key, (u, v, g) in geoms.items():
+        if g is None:
+            continue
+        lines.append(g)
+        keys.append(key)
+    wgs = (gpd.GeoSeries(lines, crs=Gc.graph["crs"]).to_crs("EPSG:4326")
+           if lines else [])
+
+    latlon = {}
+    for i, key in enumerate(keys):
+        latlon[key] = [(round(y, 5), round(x, 5)) for x, y in wgs[i].coords]
+
+    NODES_LL_local = {}
+    for i2, n2 in enumerate(nodes):
+        NODES_LL_local[n2] = (out_nodes[i2]['lat'], out_nodes[i2]['lon'])
+    globals()['NODES_LL'] = NODES_LL_local
+
+    out_edges, out_geom = [], []
     for u, v, d in S.edges(data=True):
         out_edges.append([idx[u], idx[v], round(d["w"], 3)])   # 분 단위
+        pts = latlon.get((min(u, v), max(u, v)))
+        if not pts:
+            out_geom.append(None)                 # 그릴 때 양 끝 직선으로 대체
+            continue
+        # 저장한 방향이 u->v 와 반대일 수 있다. 시작점이 u 에 가깝도록 맞춘다.
+        du = (pts[0][0] - NODES_LL[u][0]) ** 2 + (pts[0][1] - NODES_LL[u][1]) ** 2
+        dv = (pts[0][0] - NODES_LL[v][0]) ** 2 + (pts[0][1] - NODES_LL[v][1]) ** 2
+        if dv < du:
+            pts = list(reversed(pts))
+        flat = []
+        for a, b in pts:
+            flat.append(a); flat.append(b)
+        out_geom.append(flat)
 
     data = {
         "meta": {
@@ -73,10 +119,12 @@ def main():
             "tolerance_m": si.TOLERANCE,
             "walk_kmh": si.WALK_KMH,
             "sec_per_rps_round": si.SEC_PER_ROUND,
-            "note": "RSP 게임용 공릉 일대 보행망. w = 도보 분.",
+            "note": "RSP 게임용 공릉 일대 보행망. w = 도보 분. "
+                    "geom[i] = edges[i] 의 실제 도로 모양 [lat,lon,lat,lon,...]",
         },
         "nodes": out_nodes,
         "edges": out_edges,
+        "geom": out_geom,
     }
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

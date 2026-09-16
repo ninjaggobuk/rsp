@@ -362,6 +362,34 @@ select{
 
 var DATA = JSON.parse(document.getElementById("mapdata").textContent);
 var NODES = DATA.nodes, EDGES = DATA.edges;
+/* geom[i] = edges[i] 의 실제 도로 모양 [lat,lon,lat,lon,...].
+   교차로를 25 m 로 병합했기 때문에 양 끝점 직선으로 그리면 굽은 길이 펴져서
+   지도 위 도로와 어긋난다. 그리기에는 반드시 이 모양을 쓴다. */
+var GEOM = DATA.geom || [];
+var EGEO = EDGES.map(function(e, i){
+  var g = GEOM[i];
+  if (!g || g.length < 4){
+    g = [NODES[e[0]].lat, NODES[e[0]].lon, NODES[e[1]].lat, NODES[e[1]].lon];
+  }
+  var pts = [], mnLat = 9e9, mxLat = -9e9, mnLon = 9e9, mxLon = -9e9;
+  for (var k = 0; k < g.length; k += 2){
+    pts.push([g[k], g[k+1]]);
+    if (g[k] < mnLat) mnLat = g[k];
+    if (g[k] > mxLat) mxLat = g[k];
+    if (g[k+1] < mnLon) mnLon = g[k+1];
+    if (g[k+1] > mxLon) mxLon = g[k+1];
+  }
+  return {pts: pts, b: [mnLat, mnLon, mxLat, mxLon]};
+});
+/* 노드 사이 실제 도로 모양 (방향 맞춰서) */
+var PATH_OF = {};
+EDGES.forEach(function(e, i){
+  PATH_OF[e[0] + ">" + e[1]] = EGEO[i].pts;
+  PATH_OF[e[1] + ">" + e[0]] = EGEO[i].pts.slice().reverse();
+});
+function pathBetween(u, v){
+  return PATH_OF[u + ">" + v] || [[NODES[u].lat, NODES[u].lon], [NODES[v].lat, NODES[v].lon]];
+}
 var SEC_PER_ROUND = DATA.meta.sec_per_rps_round || 4.0;
 var N = NODES.length;
 
@@ -547,9 +575,7 @@ function initMap(){
   else setProvider(saved);
 
   /* 보행망 전체를 한 겹으로. 엣지마다 레이어를 만들면 1357개라 느려진다. */
-  var segs = EDGES.map(function(e){
-    return [[NODES[e[0]].lat, NODES[e[0]].lon], [NODES[e[1]].lat, NODES[e[1]].lon]];
-  });
+  var segs = EGEO.map(function(g){ return g.pts; });
   GRAPH_LINE = L.polyline(segs, {
     color: roadColor(), weight: 1.6, opacity: 0.5, interactive: false
   }).addTo(MAP);
@@ -618,7 +644,9 @@ function pin(i, color, label){
 function draw(){
   if (ENGINE === "kakao"){ kDraw(); return; }
   if (!MAP || !G) return;
-  TRAIL_LINE.setLatLngs(G.trail.map(ll));
+  var tr = [];
+  for (var ti = 1; ti < G.trail.length; ti++) tr.push(pathBetween(G.trail[ti-1], G.trail[ti]));
+  TRAIL_LINE.setLatLngs(tr);
   TRAIL_LINE.setStyle({color: cssVar("--exp")});
   GRAPH_LINE.setStyle({color: roadColor()});
 
@@ -630,7 +658,7 @@ function draw(){
   OPTS.clearLayers();
   if (G.pend && G.pend.opts){
     G.pend.opts.forEach(function(w, i){
-      L.polyline([ll(G.cur), ll(w)],
+      L.polyline(pathBetween(G.cur, w),
         {color: cssVar("--ink"), weight: 3, opacity: .7, dashArray: "6 5", interactive: false}).addTo(OPTS);
       L.marker(ll(w), {
         icon: L.divIcon({className: "", html: '<div class="opt">' + (i + 1) + '</div>',
@@ -705,6 +733,9 @@ function kSize(){
   KCX.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+function kLL(lat, lon){
+  return KMAP.getProjection().containerPointFromCoords(new kakao.maps.LatLng(lat, lon));
+}
 function kPt(i){
   var p = KMAP.getProjection().containerPointFromCoords(
     new kakao.maps.LatLng(NODES[i].lat, NODES[i].lon));
@@ -730,12 +761,21 @@ function kDraw(){
   KCX.strokeStyle = roadColor();
   KCX.lineWidth = 1.6;
   KCX.globalAlpha = 0.75;
+  /* 좌표점이 1만 개라 화면 밖 엣지는 bbox 로 먼저 걸러낸다 */
+  var vb = KMAP.getBounds();
+  var sw = vb.getSouthWest(), ne = vb.getNorthEast();
+  var mnLat = sw.getLat(), mnLon = sw.getLng(), mxLat = ne.getLat(), mxLon = ne.getLng();
   KCX.beginPath();
-  for (var i = 0; i < EDGES.length; i++){
-    var a = kPt(EDGES[i][0]), b = kPt(EDGES[i][1]);
-    if ((a.x < -40 && b.x < -40) || (a.x > w + 40 && b.x > w + 40)) continue;
-    if ((a.y < -40 && b.y < -40) || (a.y > h + 40 && b.y > h + 40)) continue;
-    KCX.moveTo(a.x, a.y); KCX.lineTo(b.x, b.y);
+  for (var i = 0; i < EGEO.length; i++){
+    var bb = EGEO[i].b;
+    if (bb[2] < mnLat || bb[0] > mxLat || bb[3] < mnLon || bb[1] > mxLon) continue;
+    var pts = EGEO[i].pts;
+    var p0 = kLL(pts[0][0], pts[0][1]);
+    KCX.moveTo(p0.x, p0.y);
+    for (var j = 1; j < pts.length; j++){
+      var pj = kLL(pts[j][0], pts[j][1]);
+      KCX.lineTo(pj.x, pj.y);
+    }
   }
   KCX.stroke();
   KCX.globalAlpha = 1;
@@ -746,9 +786,13 @@ function kDraw(){
   if (G.trail.length > 1){
     KCX.strokeStyle = cssVar("--exp"); KCX.lineWidth = 5; KCX.lineCap = "round";
     KCX.beginPath();
-    var p0 = kPt(G.trail[0]); KCX.moveTo(p0.x, p0.y);
     for (var j = 1; j < G.trail.length; j++){
-      var p = kPt(G.trail[j]); KCX.lineTo(p.x, p.y);
+      var seg = pathBetween(G.trail[j-1], G.trail[j]);
+      var s0 = kLL(seg[0][0], seg[0][1]);
+      KCX.moveTo(s0.x, s0.y);
+      for (var q = 1; q < seg.length; q++){
+        var sq = kLL(seg[q][0], seg[q][1]); KCX.lineTo(sq.x, sq.y);
+      }
     }
     KCX.stroke();
   }
@@ -758,8 +802,13 @@ function kDraw(){
     var c = kPt(G.cur);
     KCX.setLineDash([6, 5]); KCX.strokeStyle = cssVar("--ink"); KCX.lineWidth = 3;
     G.pend.opts.forEach(function(wn){
-      var p = kPt(wn);
-      KCX.beginPath(); KCX.moveTo(c.x, c.y); KCX.lineTo(p.x, p.y); KCX.stroke();
+      var seg = pathBetween(G.cur, wn);
+      var a0 = kLL(seg[0][0], seg[0][1]);
+      KCX.beginPath(); KCX.moveTo(a0.x, a0.y);
+      for (var q = 1; q < seg.length; q++){
+        var aq = kLL(seg[q][0], seg[q][1]); KCX.lineTo(aq.x, aq.y);
+      }
+      KCX.stroke();
     });
     KCX.setLineDash([]);
     G.pend.opts.forEach(function(wn, k){
