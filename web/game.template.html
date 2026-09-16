@@ -1371,6 +1371,8 @@ function subscribeRoom(){
     renderLobby();
   });
   FB.ref.child("setup").on("value", function(sn){ applySetup(sn.val()); });
+  FB.ref.child("game").on("value", function(sn){ applyGame(sn.val()); });
+  watchIntents();
   ["all", "exp", "sha"].forEach(function(sc){
     FB.ref.child("chat/" + sc).limitToLast(50).on("child_added", function(sn){
       var m = sn.val() || {};
@@ -1408,7 +1410,7 @@ function updateRoomUI(){
   });
   $("startBtn").disabled = $("startBtn").disabled || ro;
   $("randBtn").disabled = $("randBtn").disabled || ro;
-  if (ro) roomMsg("방장이 아이템과 지점을 정합니다. 채팅으로 의견을 내세요.");
+  if (ro) roomMsg("방장이 아이템과 지점을 정합니다. 시작하면 화면이 따라옵니다.");
 }
 
 function createRoom(){
@@ -1528,6 +1530,159 @@ function sendChat(){
   el.value = "";
 }
 
+/* ---------- 게임 진행 중계 (방장 -> 참가자) ----------
+   설계는 docs/MULTIPLAYER.md. 원칙: **게임 로직은 방장 브라우저에서만 돈다.**
+     방장  -> game 에 확정된 상태를 쓴다 (위치·시계·갈림길·공개된 손)
+     참가자 -> game 을 구독해 화면만 그린다. step/rpsDone 같은 건 부르지 않는다
+     참가자 -> intents/<내 uid> 에 "내 손은 바위" 만 쓴다
+   intents 는 규칙상 방장만 읽는다. 늦게 내는 사람이 남의 손을 미리 볼 수 없다. */
+
+/* 이 자리(슬롯)를 내가 직접 조작하는가.
+   로컬 모드에서는 봇이 아닌 전원(핫시트), 온라인에서는 나 하나뿐이다. */
+function localSeat(i){
+  var p = G.roster[i];
+  if (!p || p.bot) return false;
+  return (FB.mode === "local") ? true : (p.id === MYID);
+}
+
+function gameSnapshot(){
+  if (!G || !G.roster) return null;
+  var j = null;
+  if (G.pend){
+    var thrown = [];
+    for (var k in G.hands) if (G.hands.hasOwnProperty(k)) thrown.push(+k);
+    j = {
+      opts: G.pend.opts || [],
+      delta: +(G.pend.delta || 0).toFixed(2),
+      round: G.round || 0,
+      alive: G.alive || [],
+      thrown: thrown,                       /* 낸 사람 번호만. 값은 숨긴다 */
+      throws: G.throws || null,             /* 공개된 뒤에만 채워진다 */
+      stage: G.phase
+    };
+  }
+  return {
+    phase: G.phase, msg: G.msg || "",
+    start: G.start, goal: G.goal, cur: G.cur, prev: G.prev,
+    trail: G.trail || [], t: +(G.t || 0).toFixed(3),
+    limit: G.limit, extUsed: !!G.extUsed,
+    nJunc: G.nJunc || 0, nSha: G.nSha || 0,
+    rpsWin: G.rpsWin || {exp: 0, sha: 0},
+    items: G.items,
+    cfg: {nExp: G.cfg.nExp, nSha: G.cfg.nSha, voteRule: G.cfg.voteRule},
+    roster: G.roster,
+    junction: j
+  };
+}
+
+function pushGame(msg){
+  if (msg != null && G) G.msg = msg;
+  if (FB.mode !== "host" || !FB.ref) return;
+  var snap = gameSnapshot();
+  if (snap) FB.ref.child("game").set(snap);
+}
+
+/* ---------- 참가자: 받은 상태로 화면만 그린다 ---------- */
+function applyGame(v){
+  if (!v || FB.mode !== "guest") return;
+  if (!G){
+    G = freshGame({nExp: v.cfg.nExp, nSha: v.cfg.nSha, myTeam: "exp",
+                   voteRule: v.cfg.voteRule,
+                   iReE: 0, iReS: 0, iWinE: 0, iWinS: 0, iSkE: 0, iSkS: 0});
+    $("setupPanel").classList.add("hidden");
+  }
+  G.roster = v.roster || [];
+  var me = G.roster.filter(function(p){ return p.id === MYID; })[0];
+  G.cfg.nExp = v.cfg.nExp; G.cfg.nSha = v.cfg.nSha;
+  G.cfg.myTeam = me ? me.team : "exp";
+  G.cfg.voteRule = v.cfg.voteRule;
+  G.start = v.start; G.goal = v.goal; G.cur = v.cur; G.prev = v.prev;
+  G.trail = v.trail || []; G.t = v.t; G.limit = v.limit; G.extUsed = v.extUsed;
+  G.nJunc = v.nJunc; G.nSha = v.nSha; G.rpsWin = v.rpsWin || {exp: 0, sha: 0};
+  G.items = v.items || G.items;
+  G.phase = v.phase;
+
+  var j = v.junction;
+  G.pend = j ? {opts: j.opts, delta: j.delta} : null;
+  G.round = j ? j.round : 0;
+  G.alive = j ? j.alive : null;
+  G.throws = j ? j.throws : null;
+
+  renderGuestPanel(v);
+  refresh();
+  if (G.cur != null && G.goal != null && G.trail.length)
+    fitView(G.trail.concat([G.goal]), 500);
+}
+
+function renderGuestPanel(v){
+  var j = v.junction;
+  var head = '<p style="margin:0 0 8px">' + esc(v.msg || "진행 중") + '</p>';
+
+  if (v.phase === "done"){
+    setPanel("결과", head);
+    return;
+  }
+  if (!j){
+    setPanel("이동 중", head + '<p class="note">방장이 진행하고 있습니다.</p>');
+    return;
+  }
+
+  var me = myIndex();
+  var iAmAlive = (j.alive || []).indexOf(me) >= 0;
+  var iThrew = (j.thrown || []).indexOf(me) >= 0;
+  var body = head
+    + '<p style="margin:0 0 6px">' + j.round + '라운드 · 남은 인원 <b>'
+    + (j.alive || []).length + '명</b> · 이 갈림길 손해 <b>'
+    + (+j.delta).toFixed(1) + '분</b></p>'
+    + renderThrows();
+
+  if (j.stage === "rps" && iAmAlive && !iThrew){
+    body += '<div class="btnrow">'
+      + HAND.map(function(h, i){
+          return '<button data-h="' + i + '" class="h">' + h + '</button>';
+        }).join("")
+      + '</div>';
+    setPanel("내 차례", body);
+    Array.prototype.forEach.call(document.querySelectorAll("button.h"), function(b){
+      b.onclick = function(){
+        lockPanel();
+        FB.ref.child("intents/" + MYID)
+          .set({kind: "hand", round: j.round, v: +b.dataset.h, at: Date.now()});
+      };
+    });
+    return;
+  }
+  if (j.stage === "rps"){
+    body += '<p class="note">'
+      + (iAmAlive ? "냈습니다. 나머지를 기다리는 중…" : "탈락 — 구경 중")
+      + ' (' + (j.thrown || []).length + '/' + (j.alive || []).length + ' 제출)</p>';
+    setPanel("가위바위보", body);
+    return;
+  }
+  setPanel("갈림길 " + v.nJunc, body
+    + '<p class="note">방장이 진행합니다.</p>');
+}
+
+/* ---------- 방장: 참가자의 의도를 받는다 ---------- */
+function watchIntents(){
+  if (FB.mode !== "host" || !FB.ref) return;
+  FB.ref.child("intents").on("child_added", handleIntent);
+  FB.ref.child("intents").on("child_changed", handleIntent);
+}
+function handleIntent(sn){
+  var uid = sn.key, m = sn.val() || {};
+  if (!G || !G.roster || m.kind !== "hand") return;
+  var idx = -1;
+  for (var i = 0; i < G.roster.length; i++) if (G.roster[i].id === uid) idx = i;
+  if (idx < 0) return;
+  if (m.round !== G.round) return;                 /* 지난 라운드 것은 버린다 */
+  if (!G.alive || G.alive.indexOf(idx) < 0) return;
+  if (idx in G.hands) return;
+  G.hands[idx] = m.v;
+  pushGame();
+  rpsPrompt();
+}
+
 /* ---------- 게임 진행 ---------- */
 /* 선택이 확정되면 즉시 버튼을 잠근다. move() 는 120ms 뒤에 다음 단계로 가는데
    그 사이 옛 버튼을 다시 누르면 이미 이동한 위치에서 인접하지 않은 목적지를
@@ -1611,7 +1766,7 @@ function onPick(n){
     G.V = solveV(G.goal, pExp, tR);
     G.cur = G.start; G.prev = null; G.trail = [G.start];
     fitView([G.start, G.goal], 700);
-    G.phase = "arrive"; step();
+    G.phase = "arrive"; pushGame("출발"); step();
   }, 30);
 }
 
@@ -1630,6 +1785,7 @@ function step(){
   var best = vals[0], worst = vals[vals.length-1];
   G.pend = {opts: opts, best: best.w, worst: worst.w, delta: worst.v - best.v};
   G.phase = "declare";
+  pushGame("갈림길 " + G.nJunc);
   declarePhase();
 }
 
@@ -1746,12 +1902,27 @@ function rpsPrompt(){
   var pend = G.alive.filter(function(i){
     return !G.roster[i].bot && !(i in G.hands);
   });
+  var mine = pend.filter(localSeat);      /* 내가 직접 낼 자리 */
+  var remote = pend.filter(function(i){ return !localSeat(i); });
   var html = '<p style="margin:0 0 8px">' + G.round + '라운드 진행 · 남은 인원 <b>'
            + G.alive.length + '명</b> (원정대 ' + at.e + ' · 쉐도우 ' + at.s + ')</p>'
            + renderThrows();
 
-  if (pend.length){
-    var who = pend[0];
+  if (!mine.length && remote.length){
+    /* 다른 기기의 사람을 기다린다. 판정은 손이 다 모이면 handleIntent 가 이어간다. */
+    setPanel("가위바위보", html
+      + '<p class="note">' + remote.map(pname).join(", ") + ' 을(를) 기다리는 중…</p>'
+      + '<div class="btnrow"><button id="skipWait">기다리지 않고 진행(무작위)</button></div>');
+    $("skipWait").onclick = function(){
+      remote.forEach(function(i){ G.hands[i] = Math.floor(Math.random() * 3); });
+      rpsPrompt();
+    };
+    pushGame(G.round + "라운드 · " + (G.alive.length) + "명 남음");
+    refresh();
+    return;
+  }
+  if (mine.length){
+    var who = mine[0];
     html += '<p class="turn"><b>' + pname(who) + '</b> 차례'
           + (G.alive.length === G.roster.length ? "" : " — 아직 살아 있습니다") + '</p>'
           + '<div class="btnrow">'
@@ -1796,6 +1967,7 @@ function resolveRound(){
   } else {
     G.alive = G.alive.filter(function(_, k){ return ts[k] === ws; });
   }
+  pushGame(G.round + "라운드 결과");
   rpsPrompt();
 }
 
@@ -1807,6 +1979,7 @@ function rpsDone(){
   var loser = wt === "exp" ? "sha" : "exp";
   log('가위바위보 <b>' + teamName(wt) + '</b> 승 (' + G.round + '라운드, '
       + G.alive.length + '명 생존)');
+  pushGame(teamName(wt) + ' 승 — 방향 결정 중');
 
   /* 재도전권 — 진 쪽이 쓴다. 갈림길당 1회. */
   if (!G.pend.retried && G.items[loser].re > 0){
@@ -1880,6 +2053,7 @@ function move(w, why){
   if (why) log(why + " · " + fmt(edgeW(G.prev, w)) + " 이동");
   fitView(G.trail.concat([G.goal]), 500);
   NET.push({cur: G.cur, prev: G.prev, t: G.t, trail: G.trail});
+  pushGame("이동 중");
   setTimeout(step, 120);
 }
 
@@ -1904,6 +2078,7 @@ function finish(arrived){
     + '<button class="primary" id="again">새 게임</button></div>');
   $("again").onclick = function(){ $("setupPanel").classList.remove("hidden"); begin(); };
   log("<b>종료</b> · " + msg);
+  pushGame(msg);
   refresh();
 }
 
