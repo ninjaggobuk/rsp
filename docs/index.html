@@ -1644,9 +1644,12 @@ function renderGuestPanel(v){
   var iAmAlive = (j.alive || []).indexOf(me) >= 0;
   var iThrew = (j.thrown || []).indexOf(me) >= 0;
   var body = head
-    + '<p style="margin:0 0 6px">' + j.round + '라운드 · 남은 인원 <b>'
-    + (j.alive || []).length + '명</b> · 이 갈림길 손해 <b>'
-    + (+j.delta).toFixed(1) + '분</b></p>'
+    + '<p style="margin:0 0 6px">' + j.opts.length + '갈래 · 여기서 지면 <b>'
+    + (+j.delta).toFixed(1) + '분</b> 손해'
+    + (j.stage === "rps"
+        ? ' · ' + j.round + '라운드, 남은 <b>' + (j.alive || []).length + '명</b>'
+        : '')
+    + '</p>'
     + renderThrows();
 
   if (j.stage === "rps" && iAmAlive && !iThrew){
@@ -1917,6 +1920,10 @@ function rpsPrompt(){
   });
   var mine = pend.filter(localSeat);      /* 내가 직접 낼 자리 */
   var remote = pend.filter(function(i){ return !localSeat(i); });
+
+  /* 라운드가 열릴 때마다 알린다. 이게 없으면 참가자는 방장이 자기 손을 낼
+     때까지 이전 화면에 멈춰 있고, 동시에 낼 수가 없다(2026-09-17 실측). */
+  pushGame(G.round + "라운드 · 남은 " + G.alive.length + "명");
   var html = '<p style="margin:0 0 8px">' + G.round + '라운드 진행 · 남은 인원 <b>'
            + G.alive.length + '명</b> (원정대 ' + at.e + ' · 쉐도우 ' + at.s + ')</p>'
            + renderThrows();
@@ -1930,7 +1937,6 @@ function rpsPrompt(){
       remote.forEach(function(i){ G.hands[i] = Math.floor(Math.random() * 3); });
       rpsPrompt();
     };
-    pushGame(G.round + "라운드 · " + (G.alive.length) + "명 남음");
     refresh();
     return;
   }
