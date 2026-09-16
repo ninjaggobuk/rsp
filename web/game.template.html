@@ -1,6 +1,8 @@
 <title>가위바위보 원정대</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="config.js"></script>
+<script>window.RSP_CONFIG = window.RSP_CONFIG || {};</script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
 <style>
 :root{
@@ -56,8 +58,14 @@ h1{
 .panel + .panel{margin-top:14px}
 
 #mapwrap{position:relative; background:var(--surface); border:1px solid var(--hair); border-radius:10px; overflow:hidden; box-shadow:var(--shadow)}
-#map{height:480px; width:100%; background:var(--surface-2)}
-@media (max-width:860px){ #map{height:360px} }
+#map,#kmap{height:480px; width:100%; background:var(--surface-2)}
+#kmap{display:none; position:relative}
+#mapwrap.kakao #map{display:none}
+#mapwrap.kakao #kmap{display:block}
+#kcanvas{position:absolute; inset:0; pointer-events:none; z-index:5}
+#mapErr{color:var(--bad); font-size:12px; padding:0 10px}
+#mapErr:empty{display:none}
+@media (max-width:860px){ #map,#kmap{height:360px} }
 .leaflet-container{font-family:inherit; background:var(--surface-2)}
 .leaflet-control-attribution{font-size:10px}
 .pin{width:16px; height:16px; border-radius:50%; background:var(--c);
@@ -203,6 +211,8 @@ select{
       </div></div>
       <div id="mapwrap">
         <div id="map"></div>
+        <div id="kmap"><canvas id="kcanvas"></canvas></div>
+        <div id="mapErr"></div>
         <div id="hint">지도에서 <b>출발 지점</b>을 누르세요</div>
       </div>
       <div class="panel" id="junctionPanel" style="margin-top:14px">
@@ -216,6 +226,11 @@ select{
     <div>
       <div class="panel" id="setupPanel"><div class="pad">
         <h2>로비 <span class="mine" id="hostTag">방장: 나</span></h2>
+        <label style="margin-bottom:9px">내 닉네임
+          <input type="text" id="nick" maxlength="12" placeholder="나" style="flex:0 0 130px;
+            font:inherit; padding:5px 8px; border:1px solid var(--hair); border-radius:6px;
+            background:var(--surface); color:var(--ink)">
+        </label>
 
         <div class="factions">
           <div class="faction exp">
@@ -479,7 +494,7 @@ function initMap(){
   var saved = "osm";
   try {
     var v = localStorage.getItem("rsp.provider");
-    if (v && PROVIDERS[v]) saved = v;      // 없어진 공급자면 기본으로 되돌린다
+    if (v && (PROVIDERS[v] || v === "kakao")) saved = v;      // 없어진 공급자면 기본으로 되돌린다
   } catch (e) {}
   var sel = $("provider");
   Object.keys(PROVIDERS).forEach(function(k){
@@ -488,8 +503,18 @@ function initMap(){
     if (k === saved) o.selected = true;
     sel.appendChild(o);
   });
-  sel.onchange = function(){ setProvider(sel.value); };
-  setProvider(saved);
+  if (kakaoKey()){
+    var ko = document.createElement("option");
+    ko.value = "kakao"; ko.textContent = "카카오맵";
+    sel.appendChild(ko);
+    if (saved === "kakao") ko.selected = true;
+  }
+  sel.onchange = function(){
+    if (sel.value === "kakao"){ setEngine("kakao"); }
+    else { setEngine("leaflet"); setProvider(sel.value); }
+  };
+  if (saved === "kakao" && kakaoKey()) setEngine("kakao");
+  else setProvider(saved);
 
   /* 보행망 전체를 한 겹으로. 엣지마다 레이어를 만들면 1357개라 느려진다. */
   var segs = EDGES.map(function(e){
@@ -540,6 +565,7 @@ function ll(i){ return [NODES[i].lat, NODES[i].lon]; }
 
 /* 기존 코드가 부르던 이름을 그대로 유지한다 (fitView / draw). */
 function fitView(nodes, padM){
+  if (ENGINE === "kakao"){ kFit(nodes.filter(function(i){ return i != null; })); return; }
   if (!MAP || !nodes.length) return;
   var pts = nodes.filter(function(i){ return i != null; }).map(ll);
   if (!pts.length) return;
@@ -560,6 +586,7 @@ function pin(i, color, label){
 }
 
 function draw(){
+  if (ENGINE === "kakao"){ kDraw(); return; }
   if (!MAP || !G) return;
   TRAIL_LINE.setLatLngs(G.trail.map(ll));
   TRAIL_LINE.setStyle({color: cssVar("--exp")});
@@ -583,6 +610,174 @@ function draw(){
       });
     });
   }
+}
+
+/* ---------- 카카오맵 엔진 ----------
+   Leaflet 과 완전히 다른 SDK 라 컨테이너와 그리기 코드를 따로 둔다.
+   보행망은 kakao.maps.Polyline 을 1357개 만들면 느리므로, 지도 위에 캔버스를
+   한 장 덮고 직접 그린다. 좌표 변환은 map.getProjection() 을 쓴다. */
+var KMAP = null, KCV = null, KCX = null, KREADY = false;
+
+function kakaoKey(){
+  return (window.RSP_CONFIG && window.RSP_CONFIG.kakaoKey) || null;
+}
+
+function loadKakao(cb){
+  if (window.kakao && window.kakao.maps){ cb(); return; }
+  var key = kakaoKey();
+  if (!key){ cb(new Error("no key")); return; }
+  var sc = document.createElement("script");
+  sc.src = "https://dapi.kakao.com/v2/maps/sdk.js?appkey=" + key
+         + "&libraries=services&autoload=false";
+  sc.onload = function(){ kakao.maps.load(function(){ cb(); }); };
+  sc.onerror = function(){ cb(new Error("sdk load failed")); };
+  document.head.appendChild(sc);
+}
+
+function kInit(done){
+  loadKakao(function(err){
+    if (err){
+      $("mapErr").textContent =
+        "카카오맵을 불러오지 못했습니다. 키가 맞는지, 카카오 콘솔에 "
+        + location.origin + " 이 등록됐는지 확인하세요.";
+      setEngine("leaflet", true);
+      return;
+    }
+    var box = document.getElementById("kmap");
+    KMAP = new kakao.maps.Map(box, {
+      center: new kakao.maps.LatLng(NODES[0].lat, NODES[0].lon), level: 5
+    });
+    KCV = document.getElementById("kcanvas");
+    KCX = KCV.getContext("2d");
+    ["center_changed", "zoom_changed", "bounds_changed", "idle"].forEach(function(ev){
+      kakao.maps.event.addListener(KMAP, ev, kDraw);
+    });
+    kakao.maps.event.addListener(KMAP, "click", function(e){
+      if (!G) return;
+      var n = nearestNodeLL(e.latLng.getLat(), e.latLng.getLng());
+      if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(n);
+      else if (G.phase === "chooseDir" && G.pend && G.pend.opts.indexOf(n) >= 0) chooseDir(n);
+    });
+    KREADY = true;
+    kFit(NODES.map(function(_, i){ return i; }));
+    done && done();
+  });
+}
+
+function kSize(){
+  if (!KCV) return;
+  var box = document.getElementById("kmap");
+  var dpr = window.devicePixelRatio || 1;
+  KCV.width = Math.round(box.clientWidth * dpr);
+  KCV.height = Math.round(box.clientHeight * dpr);
+  KCV.style.width = box.clientWidth + "px";
+  KCV.style.height = box.clientHeight + "px";
+  KCX.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function kPt(i){
+  var p = KMAP.getProjection().containerPointFromCoords(
+    new kakao.maps.LatLng(NODES[i].lat, NODES[i].lon));
+  return p;
+}
+
+function kFit(nodes){
+  if (!KREADY || !nodes.length) return;
+  var b = new kakao.maps.LatLngBounds();
+  nodes.forEach(function(i){
+    if (i != null) b.extend(new kakao.maps.LatLng(NODES[i].lat, NODES[i].lon));
+  });
+  KMAP.setBounds(b, 40, 40, 40, 40);
+}
+
+function kDraw(){
+  if (!KREADY) return;
+  kSize();
+  var w = KCV.clientWidth, h = KCV.clientHeight;
+  KCX.clearRect(0, 0, w, h);
+
+  /* 보행망 */
+  KCX.strokeStyle = roadColor();
+  KCX.lineWidth = 1.6;
+  KCX.globalAlpha = 0.75;
+  KCX.beginPath();
+  for (var i = 0; i < EDGES.length; i++){
+    var a = kPt(EDGES[i][0]), b = kPt(EDGES[i][1]);
+    if ((a.x < -40 && b.x < -40) || (a.x > w + 40 && b.x > w + 40)) continue;
+    if ((a.y < -40 && b.y < -40) || (a.y > h + 40 && b.y > h + 40)) continue;
+    KCX.moveTo(a.x, a.y); KCX.lineTo(b.x, b.y);
+  }
+  KCX.stroke();
+  KCX.globalAlpha = 1;
+
+  if (!G) return;
+
+  /* 지나온 길 */
+  if (G.trail.length > 1){
+    KCX.strokeStyle = cssVar("--exp"); KCX.lineWidth = 5; KCX.lineCap = "round";
+    KCX.beginPath();
+    var p0 = kPt(G.trail[0]); KCX.moveTo(p0.x, p0.y);
+    for (var j = 1; j < G.trail.length; j++){
+      var p = kPt(G.trail[j]); KCX.lineTo(p.x, p.y);
+    }
+    KCX.stroke();
+  }
+
+  /* 갈림길 선택지 */
+  if (G.pend && G.pend.opts){
+    var c = kPt(G.cur);
+    KCX.setLineDash([6, 5]); KCX.strokeStyle = cssVar("--ink"); KCX.lineWidth = 3;
+    G.pend.opts.forEach(function(wn){
+      var p = kPt(wn);
+      KCX.beginPath(); KCX.moveTo(c.x, c.y); KCX.lineTo(p.x, p.y); KCX.stroke();
+    });
+    KCX.setLineDash([]);
+    G.pend.opts.forEach(function(wn, k){
+      var p = kPt(wn);
+      KCX.fillStyle = cssVar("--surface"); KCX.strokeStyle = cssVar("--road-hi");
+      KCX.lineWidth = 2;
+      KCX.beginPath(); KCX.arc(p.x, p.y, 13, 0, 6.2832); KCX.fill(); KCX.stroke();
+      KCX.fillStyle = cssVar("--ink");
+      KCX.font = "600 13px 'IBM Plex Mono', monospace";
+      KCX.textAlign = "center"; KCX.textBaseline = "middle";
+      KCX.fillText(String(k + 1), p.x, p.y + 0.5);
+    });
+  }
+
+  function mk(idx, color, label){
+    if (idx == null) return;
+    var p = kPt(idx);
+    KCX.fillStyle = color; KCX.beginPath(); KCX.arc(p.x, p.y, 8, 0, 6.2832); KCX.fill();
+    KCX.strokeStyle = cssVar("--surface"); KCX.lineWidth = 2.5; KCX.stroke();
+    if (label){
+      KCX.fillStyle = cssVar("--ink");
+      KCX.font = "600 11px 'IBM Plex Sans KR', sans-serif";
+      KCX.textAlign = "center"; KCX.textBaseline = "bottom";
+      KCX.fillText(label, p.x, p.y - 11);
+    }
+  }
+  mk(G.goal, cssVar("--sha"), "도착");
+  if (G.start != null && G.cur !== G.start) mk(G.start, cssVar("--muted"), "출발");
+  mk(G.cur, cssVar("--exp"), "현재");
+}
+
+/* ---------- 엔진 전환 ---------- */
+var ENGINE = "leaflet";
+function setEngine(which, silent){
+  ENGINE = which;
+  document.getElementById("mapwrap").classList.toggle("kakao", which === "kakao");
+  if (which === "kakao"){
+    if (!KREADY) kInit(function(){ draw(); });
+    else { kakao.maps.event.trigger(KMAP, "resize"); kFit(viewNodes()); kDraw(); }
+  } else {
+    if (MAP) setTimeout(function(){ MAP.invalidateSize(false); draw(); }, 30);
+  }
+  if (!silent) try { localStorage.setItem("rsp.provider", which === "kakao" ? "kakao" : "osm"); } catch (e) {}
+}
+
+function viewNodes(){
+  if (G && G.trail && G.trail.length) return G.trail.concat([G.goal]);
+  return NODES.map(function(_, i){ return i; });
 }
 
 /* ---------- 장소 검색 (Nominatim, 키 불필요) ---------- */
@@ -720,8 +915,18 @@ function addBot(team){
   BOTSEQ++;
   PLAYERS.push({id: "b" + BOTSEQ, name: "봇 " + BOTSEQ, team: team, bot: true});
 }
+function myNick(){
+  var v = ($("nick").value || "").trim();
+  return v || "나";
+}
 function initLobby(){
-  PLAYERS = [{id: MYID, name: "나", team: "exp", bot: false}];
+  try { $("nick").value = localStorage.getItem("rsp.nick") || ""; } catch (e) {}
+  $("nick").oninput = function(){
+    try { localStorage.setItem("rsp.nick", $("nick").value.trim()); } catch (e) {}
+    PLAYERS.forEach(function(p){ if (p.id === MYID) p.name = myNick(); });
+    renderLobby();
+  };
+  PLAYERS = [{id: MYID, name: myNick(), team: "exp", bot: false}];
   BOTSEQ = 0;
   addBot("exp"); addBot("exp"); addBot("exp");
   addBot("sha"); addBot("sha");

@@ -40,8 +40,9 @@ def main():
     if "</script" in mj.lower():
         raise SystemExit("지도 JSON 안에 script 종료 태그가 있다")
 
-    # 템플릿에 남은 옛 캔버스 시절 식별자 — 있으면 런타임에 터진다
-    for dead in ("sizeCanvas", "getContext", "cv.", "nearestNode("):
+    # 옛 캔버스(Leaflet 이전) 시절 식별자 — 있으면 런타임에 터진다.
+    # getContext 는 카카오 오버레이가 정당하게 쓰므로 목록에서 뺐다.
+    for dead in ("sizeCanvas", "cv.", "nearestNode(", "$(\"nExp\")", "$(\"myTeam\")"):
         if dead in tpl:
             raise SystemExit("템플릿에 죽은 참조가 남아 있다: %s" % dead)
 
