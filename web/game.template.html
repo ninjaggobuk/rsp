@@ -1,4 +1,6 @@
 <title>가위바위보 원정대</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
 <style>
 :root{
@@ -54,7 +56,26 @@ h1{
 .panel + .panel{margin-top:14px}
 
 #mapwrap{position:relative; background:var(--surface); border:1px solid var(--hair); border-radius:10px; overflow:hidden; box-shadow:var(--shadow)}
-canvas{display:block; width:100%; height:auto; touch-action:manipulation}
+#map{height:480px; width:100%; background:var(--surface-2)}
+@media (max-width:860px){ #map{height:360px} }
+.leaflet-container{font-family:inherit; background:var(--surface-2)}
+.leaflet-control-attribution{font-size:10px}
+.pin{width:16px; height:16px; border-radius:50%; background:var(--c);
+     box-shadow:0 0 0 2.5px var(--surface), 0 1px 4px rgba(0,0,0,.4); position:relative}
+.pin span{position:absolute; bottom:18px; left:50%; transform:translateX(-50%);
+     white-space:nowrap; font-size:11px; font-weight:600; color:var(--ink);
+     background:var(--surface); border:1px solid var(--hair); border-radius:4px; padding:1px 5px}
+.opt{width:26px; height:26px; border-radius:50%; background:var(--surface);
+     border:2px solid var(--road-hi); color:var(--ink); font-weight:600; cursor:pointer;
+     font-family:"IBM Plex Mono",monospace; display:flex; align-items:center; justify-content:center}
+.opt:hover{border-color:var(--exp)}
+.searchbar{display:flex; gap:8px; flex-wrap:wrap}
+.searchbar input{flex:1 1 200px; font:inherit; padding:7px 10px; border:1px solid var(--hair);
+     border-radius:7px; background:var(--surface); color:var(--ink)}
+.searchbar input:focus-visible{outline:2px solid var(--exp); outline-offset:1px}
+#results{display:flex; flex-direction:column; gap:4px; margin-top:8px}
+#results:empty{margin-top:0}
+.hit{text-align:left; font-size:12px; padding:6px 9px; width:100%}
 #hint{
   position:absolute; left:10px; top:10px; background:var(--surface);
   border:1px solid var(--hair); border-radius:6px; padding:5px 9px;
@@ -151,8 +172,16 @@ select{
 
   <div class="board">
     <div>
+      <div class="panel" style="margin-bottom:14px"><div class="pad">
+        <div class="searchbar">
+          <input type="text" id="q" placeholder="장소 검색 — 예: 서울과학기술대학교, 공릉역">
+          <button id="searchBtn">검색</button>
+          <select id="provider" aria-label="지도 종류"></select>
+        </div>
+        <div id="results"></div>
+      </div></div>
       <div id="mapwrap">
-        <canvas id="map"></canvas>
+        <div id="map"></div>
         <div id="hint">지도에서 <b>출발 지점</b>을 누르세요</div>
       </div>
       <div class="panel" id="junctionPanel" style="margin-top:14px">
@@ -355,109 +384,169 @@ function freshGame(cfg){
   };
 }
 
-/* ---------- 지도 그리기 ---------- */
-var cv = document.getElementById("map"), cx = cv.getContext("2d");
-var view = {x0:0, y0:0, x1:1, y1:1};
+/* ---------- 지도 (Leaflet + 실제 타일) ----------
+   아트팩트는 외부 이미지를 차단하므로 타일이 뜨지 않는다. 이 버전은
+   GitHub Pages 전용이다. 카카오/네이버/구글은 각자 다른 SDK 라 타일 주소만
+   바꾸는 걸로는 안 되고, 사장님 계정으로 발급한 키가 있어야 붙일 수 있다. */
+var MAP = null, GRAPH_LINE = null, TRAIL_LINE = null, TILE = null;
+var MARKS = null, OPTS = null;
 function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
-function fitView(nodes, padM){
-  var xs = nodes.map(function(i){return NODES[i].x;});
-  var ys = nodes.map(function(i){return NODES[i].y;});
-  var p = padM || 500;
-  var x0 = Math.min.apply(null,xs)-p, x1 = Math.max.apply(null,xs)+p;
-  var y0 = Math.min.apply(null,ys)-p, y1 = Math.max.apply(null,ys)+p;
-  var w = x1-x0, h = y1-y0, m = Math.max(w,h);
-  var mx = (x0+x1)/2, my = (y0+y1)/2;
-  view = {x0:mx-m/2, y0:my-m/2, x1:mx+m/2, y1:my+m/2};
-}
-function sx(x){ return (x - view.x0) / (view.x1 - view.x0) * cv.width; }
-function sy(y){ return cv.height - (y - view.y0) / (view.y1 - view.y0) * cv.height; }
-
-function sizeCanvas(){
-  var r = cv.parentElement.getBoundingClientRect();
-  var dpr = window.devicePixelRatio || 1;
-  var w = Math.max(280, r.width), h = Math.round(Math.min(560, Math.max(300, w * 0.78)));
-  cv.width = Math.round(w*dpr); cv.height = Math.round(h*dpr);
-  cv.style.height = h + "px";
-}
-
-function draw(){
-  if (!cv.width) return;
-  var road = cssVar("--road"), roadHi = cssVar("--road-hi");
-  var exp = cssVar("--exp"), sha = cssVar("--sha"), surf = cssVar("--surface");
-  var ink = cssVar("--ink");
-  cx.fillStyle = surf; cx.fillRect(0,0,cv.width,cv.height);
-
-  var k = cv.width / (view.x1 - view.x0);
-  cx.lineWidth = Math.max(0.9, 1.6 * k * 8);
-  cx.strokeStyle = road; cx.lineCap = "round";
-  cx.beginPath();
-  for (var i = 0; i < EDGES.length; i++){
-    var a = NODES[EDGES[i][0]], b = NODES[EDGES[i][1]];
-    var ax = sx(a.x), ay = sy(a.y), bx = sx(b.x), by = sy(b.y);
-    if ((ax<-50&&bx<-50)||(ax>cv.width+50&&bx>cv.width+50)) continue;
-    if ((ay<-50&&by<-50)||(ay>cv.height+50&&by>cv.height+50)) continue;
-    cx.moveTo(ax,ay); cx.lineTo(bx,by);
+var PROVIDERS = {
+  osm: {
+    name: "OpenStreetMap",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자'
+  },
+  light: {
+    name: "밝은 지도",
+    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+    attr: '&copy; OpenStreetMap 기여자, &copy; <a href="https://carto.com/attributions">CARTO</a>'
+  },
+  dark: {
+    name: "어두운 지도",
+    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+    attr: '&copy; OpenStreetMap 기여자, &copy; <a href="https://carto.com/attributions">CARTO</a>'
   }
-  cx.stroke();
+};
 
-  if (!G) return;
-
-  /* 지나온 길 */
-  if (G.trail.length > 1){
-    cx.strokeStyle = exp; cx.lineWidth = Math.max(2.4, 3.2 * k * 8); cx.globalAlpha = .85;
-    cx.beginPath();
-    cx.moveTo(sx(NODES[G.trail[0]].x), sy(NODES[G.trail[0]].y));
-    for (var j = 1; j < G.trail.length; j++)
-      cx.lineTo(sx(NODES[G.trail[j]].x), sy(NODES[G.trail[j]].y));
-    cx.stroke(); cx.globalAlpha = 1;
-  }
-
-  /* 현재 갈림길의 선택지 */
-  if (G.pend && G.pend.opts){
-    cx.strokeStyle = roadHi; cx.lineWidth = Math.max(2, 2.6 * k * 8);
-    cx.setLineDash([6,5]);
-    G.pend.opts.forEach(function(w){
-      cx.beginPath();
-      cx.moveTo(sx(NODES[G.cur].x), sy(NODES[G.cur].y));
-      cx.lineTo(sx(NODES[w].x), sy(NODES[w].y));
-      cx.stroke();
-    });
-    cx.setLineDash([]);
-    G.pend.opts.forEach(function(w, i){
-      var px = sx(NODES[w].x), py = sy(NODES[w].y);
-      cx.fillStyle = surf; cx.strokeStyle = roadHi; cx.lineWidth = 2;
-      cx.beginPath(); cx.arc(px,py,13,0,6.2832); cx.fill(); cx.stroke();
-      cx.fillStyle = ink; cx.font = "600 13px 'IBM Plex Mono', monospace";
-      cx.textAlign = "center"; cx.textBaseline = "middle";
-      cx.fillText(String(i+1), px, py+.5);
-    });
-  }
-
-  function marker(idx, color, label){
-    if (idx == null) return;
-    var px = sx(NODES[idx].x), py = sy(NODES[idx].y);
-    cx.fillStyle = color; cx.beginPath(); cx.arc(px,py,8,0,6.2832); cx.fill();
-    cx.strokeStyle = surf; cx.lineWidth = 2.5; cx.stroke();
-    if (label){
-      cx.fillStyle = ink; cx.font = "600 11px 'IBM Plex Sans KR', sans-serif";
-      cx.textAlign = "center"; cx.textBaseline = "bottom";
-      cx.fillText(label, px, py - 11);
-    }
-  }
-  marker(G.goal, sha, "도착");
-  marker(G.cur, exp, "현재");
-  if (G.start != null && G.cur !== G.start) marker(G.start, cssVar("--muted"), null);
+function prefersDark(){
+  var root = document.documentElement.getAttribute("data-theme");
+  if (root === "dark") return true;
+  if (root === "light") return false;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-function nearestNode(mx, my){
-  var best = -1, bd = Infinity;
+function setProvider(key){
+  var p = PROVIDERS[key] || PROVIDERS.osm;
+  if (TILE) MAP.removeLayer(TILE);
+  TILE = L.tileLayer(p.url, {maxZoom: 19, attribution: p.attr, subdomains: "abc"}).addTo(MAP);
+  TILE.setZIndex(0);
+  try { localStorage.setItem("rsp.provider", key); } catch (e) {}
+}
+
+function initMap(){
+  MAP = L.map("map", {preferCanvas: true, zoomControl: true});
+  var saved = "osm";
+  try { saved = localStorage.getItem("rsp.provider") || (prefersDark() ? "dark" : "osm"); } catch (e) {}
+  var sel = $("provider");
+  Object.keys(PROVIDERS).forEach(function(k){
+    var o = document.createElement("option");
+    o.value = k; o.textContent = PROVIDERS[k].name;
+    if (k === saved) o.selected = true;
+    sel.appendChild(o);
+  });
+  sel.onchange = function(){ setProvider(sel.value); };
+  setProvider(saved);
+
+  /* 보행망 전체를 한 겹으로. 엣지마다 레이어를 만들면 1357개라 느려진다. */
+  var segs = EDGES.map(function(e){
+    return [[NODES[e[0]].lat, NODES[e[0]].lon], [NODES[e[1]].lat, NODES[e[1]].lon]];
+  });
+  GRAPH_LINE = L.polyline(segs, {
+    color: cssVar("--road-hi"), weight: 1.6, opacity: 0.5, interactive: false
+  }).addTo(MAP);
+
+  TRAIL_LINE = L.polyline([], {color: cssVar("--exp"), weight: 5, opacity: 0.85, interactive: false}).addTo(MAP);
+  MARKS = L.layerGroup().addTo(MAP);
+  OPTS = L.layerGroup().addTo(MAP);
+
+  MAP.fitBounds(GRAPH_LINE.getBounds());
+  MAP.on("click", function(ev){
+    if (!G) return;
+    var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
+    if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(n);
+  });
+}
+
+function nearestNodeLL(lat, lon){
+  var best = -1, bd = Infinity, cf = Math.cos(lat * Math.PI / 180);
   for (var i = 0; i < N; i++){
-    var dx = sx(NODES[i].x) - mx, dy = sy(NODES[i].y) - my;
-    var d = dx*dx + dy*dy;
+    var dy = NODES[i].lat - lat, dx = (NODES[i].lon - lon) * cf;
+    var d = dx * dx + dy * dy;
     if (d < bd){ bd = d; best = i; }
   }
   return best;
+}
+
+function ll(i){ return [NODES[i].lat, NODES[i].lon]; }
+
+/* 기존 코드가 부르던 이름을 그대로 유지한다 (fitView / draw). */
+function fitView(nodes, padM){
+  if (!MAP || !nodes.length) return;
+  var pts = nodes.filter(function(i){ return i != null; }).map(ll);
+  if (!pts.length) return;
+  var b = L.latLngBounds(pts);
+  MAP.fitBounds(b, {padding: [40, 40], maxZoom: 17});
+}
+
+function pin(i, color, label){
+  return L.marker(ll(i), {
+    interactive: false,
+    icon: L.divIcon({
+      className: "",
+      html: '<div class="pin" style="--c:' + color + '">'
+            + (label ? '<span>' + label + '</span>' : '') + '</div>',
+      iconSize: [16, 16], iconAnchor: [8, 8]
+    })
+  });
+}
+
+function draw(){
+  if (!MAP || !G) return;
+  TRAIL_LINE.setLatLngs(G.trail.map(ll));
+  TRAIL_LINE.setStyle({color: cssVar("--exp")});
+  GRAPH_LINE.setStyle({color: cssVar("--road-hi")});
+
+  MARKS.clearLayers();
+  if (G.goal != null) pin(G.goal, cssVar("--sha"), "도착").addTo(MARKS);
+  if (G.start != null && G.cur !== G.start) pin(G.start, cssVar("--muted"), "출발").addTo(MARKS);
+  if (G.cur != null) pin(G.cur, cssVar("--exp"), "현재").addTo(MARKS);
+
+  OPTS.clearLayers();
+  if (G.pend && G.pend.opts){
+    G.pend.opts.forEach(function(w, i){
+      L.polyline([ll(G.cur), ll(w)],
+        {color: cssVar("--ink"), weight: 3, opacity: .7, dashArray: "6 5", interactive: false}).addTo(OPTS);
+      L.marker(ll(w), {
+        icon: L.divIcon({className: "", html: '<div class="opt">' + (i + 1) + '</div>',
+                         iconSize: [26, 26], iconAnchor: [13, 13]})
+      }).addTo(OPTS).on("click", function(){
+        if (G.phase === "chooseDir") chooseDir(w);
+      });
+    });
+  }
+}
+
+/* ---------- 장소 검색 (Nominatim, 키 불필요) ---------- */
+function searchPlace(){
+  var q = $("q").value.trim();
+  if (!q) return;
+  var b = GRAPH_LINE.getBounds();
+  var box = [b.getWest(), b.getNorth(), b.getEast(), b.getSouth()].join(",");
+  var url = "https://nominatim.openstreetmap.org/search?format=json&limit=6&bounded=1"
+          + "&viewbox=" + box + "&q=" + encodeURIComponent(q);
+  $("results").innerHTML = '<div class="note">찾는 중…</div>';
+  fetch(url, {headers: {"Accept": "application/json"}})
+    .then(function(r){ return r.json(); })
+    .then(function(list){
+      if (!list.length){ $("results").innerHTML = '<div class="note">결과 없음. 지도를 직접 눌러도 됩니다.</div>'; return; }
+      $("results").innerHTML = "";
+      list.forEach(function(h){
+        var b2 = document.createElement("button");
+        b2.className = "hit";
+        b2.textContent = h.display_name.split(",").slice(0, 3).join(", ");
+        b2.onclick = function(){
+          var n = nearestNodeLL(+h.lat, +h.lon);
+          MAP.setView(ll(n), 16);
+          if (G && (G.phase === "pickStart" || G.phase === "pickGoal")) onPick(n);
+        };
+        $("results").appendChild(b2);
+      });
+    })
+    .catch(function(){
+      $("results").innerHTML = '<div class="note">검색 실패 — 지도를 직접 누르세요.</div>';
+    });
 }
 
 /* ---------- UI ---------- */
@@ -565,7 +654,7 @@ function begin(){
   G = freshGame(cfg);
   $("log").innerHTML = "";
   $("setupPanel").classList.add("hidden");
-  fitView(NODES.map(function(_,i){return i;}), 100);
+  if (MAP && GRAPH_LINE) MAP.fitBounds(GRAPH_LINE.getBounds());
   $("hint").classList.remove("hidden");
   $("hint").innerHTML = "지도에서 <b>출발 지점</b>을 누르세요";
   setPanel("지점 선택", '<p class="note">출발과 도착을 차례로 누르세요. 도보 25~30분 거리가 권장 범위입니다.</p>');
@@ -906,10 +995,9 @@ $("extBtn").onclick = function(){
   log("<b>30분 연장권 사용</b> → 제한 90:00");
   refresh();
 };
-window.addEventListener("resize", function(){ sizeCanvas(); draw(); });
-sizeCanvas();
-fitView(NODES.map(function(_,i){return i;}), 100);
-draw();
+initMap();
+$("searchBtn").onclick = searchPlace;
+$("q").addEventListener("keydown", function(e){ if (e.key === "Enter") searchPlace(); });
 setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 재도전권 1:1 은 공릉 24개 루트에서 중앙값 49.7%가 나온 구성입니다.</p>');
 })();
 </script>
