@@ -458,7 +458,22 @@ function initMap(){
   MARKS = L.layerGroup().addTo(MAP);
   OPTS = L.layerGroup().addTo(MAP);
 
-  MAP.fitBounds(GRAPH_LINE.getBounds());
+  /* 컨테이너 크기가 0인 채로 초기화되면(숨겨진 탭, 모바일 회전, 늦은 레이아웃)
+     Leaflet 이 줌 0 에 갇힌다. 크기가 잡히면 다시 맞춘다. */
+  function refit(){
+    MAP.invalidateSize(false);
+    if (G && G.trail && G.trail.length) return;      // 게임 중이면 시야를 건드리지 않는다
+    MAP.fitBounds(GRAPH_LINE.getBounds(), {padding: [20, 20]});
+  }
+  refit();
+  setTimeout(refit, 60);
+  setTimeout(refit, 400);
+  window.addEventListener("resize", function(){ MAP.invalidateSize(false); });
+  if (window.ResizeObserver){
+    new ResizeObserver(function(){ MAP.invalidateSize(false); })
+      .observe(document.getElementById("map"));
+  }
+
   MAP.on("click", function(ev){
     if (!G) return;
     var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
