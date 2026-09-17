@@ -277,6 +277,9 @@ select{
           </div>
         </div>
         <p class="note" id="lobbyWarn"></p>
+        <div class="btnrow" style="margin-bottom:10px">
+          <button id="cleanOff" class="hidden">끊긴 사람 정리</button>
+        </div>
 
         <fieldset>
           <legend>아이템 분배 (원정대 / 쉐도우)</legend>
@@ -1062,7 +1065,8 @@ function teamCount(t){
   return PLAYERS.filter(function(p){ return p.team === t; }).length;
 }
 function addBot(team){
-  if (PLAYERS.length >= MAXP) return;
+  var live = PLAYERS.filter(function(p){ return !p.off; }).length;
+  if (live >= MAXP) return;
   BOTSEQ++;
   PLAYERS.push({id: "b" + BOTSEQ, name: "봇 " + BOTSEQ, team: team, bot: true});
 }
@@ -1109,11 +1113,14 @@ function renderLobby(){
       };
       row.appendChild(mv);
 
-      if (p.bot){
+      /* 끊긴 사람이 자리를 차지해 정원이 막히므로, 방장은 누구든 내보낼 수
+         있어야 한다(자기 자신 제외). 로컬 모드에서는 봇만 해당된다. */
+      var canKick = p.bot || (FB.mode === "host" && p.id !== MYID);
+      if (canKick){
         var rm = document.createElement("button");
         rm.className = "tiny";
         rm.textContent = "✕";
-        rm.title = "내보내기";
+        rm.title = p.bot ? "봇 내보내기" : "내보내기";
         rm.onclick = function(){
           PLAYERS = PLAYERS.filter(function(q){ return q.id !== p.id; });
           renderLobby();
@@ -1126,20 +1133,28 @@ function renderLobby(){
   });
 
   var e = teamCount("exp"), s = teamCount("sha");
+  var live = PLAYERS.filter(function(p){ return !p.off; }).length;   /* 끊긴 사람 제외 */
+  var offN = PLAYERS.length - live;
   $("cntExp").textContent = e;
   $("cntSha").textContent = s;
+  var cl = $("cleanOff");
+  if (cl){
+    cl.classList.toggle("hidden", !(offN && FB.mode === "host"));
+    cl.textContent = "끊긴 사람 " + offN + "명 정리";
+  }
 
   var w = [];
   if (!e || !s) w.push("양 팀에 최소 한 명씩 있어야 시작할 수 있습니다.");
   if (s >= 3) w.push("쉐도우가 3명 이상이면 세 기호로 갈라 무승부를 영원히 만들 수 있습니다 — 규칙 구멍이라 2명까지 권합니다.");
-  if (PLAYERS.length >= MAXP) w.push("정원 " + MAXP + "명이 찼습니다.");
+  if (live >= MAXP) w.push("정원 " + MAXP + "명이 찼습니다.");
+  if (offN) w.push(offN + "명이 접속이 끊긴 채 남아 있습니다 — 방장이 정리할 수 있습니다.");
   $("lobbyWarn").textContent = w.join(" ");
 
   var bad = !e || !s;
   $("startBtn").disabled = bad;
   $("randBtn").disabled = bad;
   Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
-    b.disabled = PLAYERS.length >= MAXP || FB.mode === "guest";
+    b.disabled = live >= MAXP || FB.mode === "guest";
   });
 }
 
@@ -2156,6 +2171,11 @@ Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
   b.onclick = function(){ addBot(b.dataset.team); renderLobby(); };
 });
 initLobby();
+$("cleanOff").onclick = function(){
+  PLAYERS = PLAYERS.filter(function(p){ return !p.off; });
+  renderLobby();
+  lobbyChanged();
+};
 $("mkRoom").onclick = createRoom;
 setTimeout(autoJoinFromURL, 300);
 $("joinRoom").onclick = joinRoom;
