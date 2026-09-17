@@ -704,11 +704,6 @@ function initMap(){
     var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
     if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(n);
   });
-  MAP.on("contextmenu", function(ev){
-    if (!G) return;
-    var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
-    showCtx(ev.containerPoint.x, ev.containerPoint.y, n);
-  });
 }
 
 var CTX = {node: null};
@@ -725,6 +720,23 @@ function hideCtx(){ $("ctxMenu").classList.add("hidden"); }
 
 /* 폰에는 우클릭이 없다. 한 손가락으로 550 ms 누르면 같은 메뉴를 연다.
    움직이면(지도를 끄는 중이면) 취소한다. */
+/* 래퍼 기준 화면 좌표를 노드로 바꿔 메뉴를 연다.
+   카카오의 rightclick 이벤트는 쓰지 않는다 — 합성 contextmenu 에서 안 뜨고,
+   엔진마다 갈라놓으면 롱프레스와 코드가 두 벌이 된다. */
+function ctxAt(px, py){
+  if (!G) return;
+  var lat, lon;
+  if (ENGINE === "kakao" && KREADY){
+    var c = KMAP.getProjection().coordsFromContainerPoint(
+              new kakao.maps.Point(px, py));
+    lat = c.getLat(); lon = c.getLng();
+  } else if (MAP){
+    var g = MAP.containerPointToLatLng([px, py]);
+    lat = g.lat; lon = g.lng;
+  } else return;
+  showCtx(px, py, nearestNodeLL(lat, lon));
+}
+
 (function longPress(){
   var tm = null, sx = 0, sy = 0;
   function pt(ev){
@@ -734,22 +746,19 @@ function hideCtx(){ $("ctxMenu").classList.add("hidden"); }
   function cancel(){ if (tm){ clearTimeout(tm); tm = null; } }
   document.addEventListener("DOMContentLoaded", function(){
     var w = document.getElementById("mapwrap");
+    w.addEventListener("contextmenu", function(ev){
+      if (ev.target.closest && ev.target.closest("#ctxMenu")) return;
+      ev.preventDefault();
+      var b = w.getBoundingClientRect();
+      ctxAt(ev.clientX - b.left, ev.clientY - b.top);
+    });
     w.addEventListener("touchstart", function(ev){
       if (!G || ev.touches.length !== 1) return;
       var q = pt(ev); sx = q[0]; sy = q[1];
       cancel();
       tm = setTimeout(function(){
         tm = null;
-        var lat, lon;
-        if (ENGINE === "kakao" && KREADY){
-          var c = KMAP.getProjection().coordsFromContainerPoint(
-                    new kakao.maps.Point(sx, sy));
-          lat = c.getLat(); lon = c.getLng();
-        } else if (MAP){
-          var g = MAP.containerPointToLatLng([sx, sy]);
-          lat = g.lat; lon = g.lng;
-        } else return;
-        showCtx(sx, sy, nearestNodeLL(lat, lon));
+        ctxAt(sx, sy);
       }, 550);
     }, {passive: true});
     w.addEventListener("touchmove", function(ev){
@@ -865,13 +874,6 @@ function kInit(done){
     KCX = KCV.getContext("2d");
     ["center_changed", "zoom_changed", "bounds_changed", "idle"].forEach(function(ev){
       kakao.maps.event.addListener(KMAP, ev, kDraw);
-    });
-    $("kmap").addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
-    kakao.maps.event.addListener(KMAP, "rightclick", function(e){
-      if (!G) return;
-      var n = nearestNodeLL(e.latLng.getLat(), e.latLng.getLng());
-      var pt = kLL(NODES[n].lat, NODES[n].lon);
-      showCtx(pt.x, pt.y, n);
     });
     kakao.maps.event.addListener(KMAP, "click", function(e){
       hideCtx();
