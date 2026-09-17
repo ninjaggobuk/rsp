@@ -71,6 +71,12 @@ h1{
 #kcanvas{position:absolute; inset:0; pointer-events:none; z-index:5}
 #mapErr{color:var(--bad); font-size:12px; padding:0 10px}
 #mapErr:empty{display:none}
+#ctxMenu{position:absolute; z-index:20; background:var(--surface); border:1px solid var(--hair);
+  border-radius:8px; box-shadow:var(--shadow); padding:5px; display:flex; flex-direction:column; gap:3px}
+#ctxMenu button{font-size:13px; padding:6px 12px; text-align:left; border:none; background:transparent}
+#ctxMenu button:hover{background:var(--surface-2)}
+.findpin{width:14px;height:14px;border-radius:50%;background:var(--warn);
+  box-shadow:0 0 0 2.5px var(--surface),0 1px 4px rgba(0,0,0,.4)}
 @media (max-width:860px){ #map,#kmap{height:360px} }
 .leaflet-container{font-family:inherit; background:var(--surface-2)}
 .leaflet-control-attribution{font-size:10px}
@@ -235,6 +241,11 @@ select{
         <div id="map"></div>
         <div id="kmap"><canvas id="kcanvas"></canvas></div>
         <div id="mapErr"></div>
+        <div id="ctxMenu" class="hidden">
+          <button data-k="start">출발 지점으로</button>
+          <button data-k="goal">도착 지점으로</button>
+          <button data-k="close" class="ghost">닫기</button>
+        </div>
         <div id="hint">지도에서 <b>출발 지점</b>을 누르세요</div>
       </div>
       <div class="panel" id="junctionPanel" style="margin-top:14px">
@@ -688,11 +699,68 @@ function initMap(){
   }
 
   MAP.on("click", function(ev){
+    hideCtx();
     if (!G) return;
     var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
     if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(n);
   });
+  MAP.on("contextmenu", function(ev){
+    if (!G) return;
+    var n = nearestNodeLL(ev.latlng.lat, ev.latlng.lng);
+    showCtx(ev.containerPoint.x, ev.containerPoint.y, n);
+  });
 }
+
+var CTX = {node: null};
+function showCtx(px, py, node){
+  if (FB.mode === "guest") return;
+  CTX.node = node;
+  var m = $("ctxMenu");
+  var box = document.getElementById("mapwrap").getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(px, box.width - 150)) + "px";
+  m.style.top = Math.max(4, Math.min(py, box.height - 116)) + "px";
+  m.classList.remove("hidden");
+}
+function hideCtx(){ $("ctxMenu").classList.add("hidden"); }
+
+/* 폰에는 우클릭이 없다. 한 손가락으로 550 ms 누르면 같은 메뉴를 연다.
+   움직이면(지도를 끄는 중이면) 취소한다. */
+(function longPress(){
+  var tm = null, sx = 0, sy = 0;
+  function pt(ev){
+    var b = document.getElementById("mapwrap").getBoundingClientRect();
+    return [ev.touches[0].clientX - b.left, ev.touches[0].clientY - b.top];
+  }
+  function cancel(){ if (tm){ clearTimeout(tm); tm = null; } }
+  document.addEventListener("DOMContentLoaded", function(){
+    var w = document.getElementById("mapwrap");
+    w.addEventListener("touchstart", function(ev){
+      if (!G || ev.touches.length !== 1) return;
+      var q = pt(ev); sx = q[0]; sy = q[1];
+      cancel();
+      tm = setTimeout(function(){
+        tm = null;
+        var lat, lon;
+        if (ENGINE === "kakao" && KREADY){
+          var c = KMAP.getProjection().coordsFromContainerPoint(
+                    new kakao.maps.Point(sx, sy));
+          lat = c.getLat(); lon = c.getLng();
+        } else if (MAP){
+          var g = MAP.containerPointToLatLng([sx, sy]);
+          lat = g.lat; lon = g.lng;
+        } else return;
+        showCtx(sx, sy, nearestNodeLL(lat, lon));
+      }, 550);
+    }, {passive: true});
+    w.addEventListener("touchmove", function(ev){
+      if (!tm || !ev.touches.length) return cancel();
+      var q = pt(ev);
+      if (Math.abs(q[0]-sx) > 10 || Math.abs(q[1]-sy) > 10) cancel();
+    }, {passive: true});
+    w.addEventListener("touchend", cancel, {passive: true});
+    w.addEventListener("touchcancel", cancel, {passive: true});
+  });
+})();
 
 function nearestNodeLL(lat, lon){
   var best = -1, bd = Infinity, cf = Math.cos(lat * Math.PI / 180);
@@ -798,7 +866,15 @@ function kInit(done){
     ["center_changed", "zoom_changed", "bounds_changed", "idle"].forEach(function(ev){
       kakao.maps.event.addListener(KMAP, ev, kDraw);
     });
+    $("kmap").addEventListener("contextmenu", function(ev){ ev.preventDefault(); });
+    kakao.maps.event.addListener(KMAP, "rightclick", function(e){
+      if (!G) return;
+      var n = nearestNodeLL(e.latLng.getLat(), e.latLng.getLng());
+      var pt = kLL(NODES[n].lat, NODES[n].lon);
+      showCtx(pt.x, pt.y, n);
+    });
     kakao.maps.event.addListener(KMAP, "click", function(e){
+      hideCtx();
       if (!G) return;
       var n = nearestNodeLL(e.latLng.getLat(), e.latLng.getLng());
       if (G.phase === "pickStart" || G.phase === "pickGoal") onPick(n);
@@ -951,6 +1027,48 @@ function viewNodes(){
 }
 
 /* ---------- 장소 검색 (Nominatim, 키 불필요) ---------- */
+/* 검색 결과나 메뉴에서 고른 지점으로 지도를 옮긴다 */
+function gotoNode(n){
+  if (ENGINE === "kakao" && KREADY){
+    KMAP.setCenter(new kakao.maps.LatLng(NODES[n].lat, NODES[n].lon));
+    KMAP.setLevel(3);
+    kDraw();
+  } else if (MAP){
+    MAP.setView([NODES[n].lat, NODES[n].lon], 17);
+  }
+}
+
+var FOUND = null;
+function clearFound(){
+  if (!FOUND) return;
+  try {
+    if (FOUND.setMap) FOUND.setMap(null);          // 카카오 오버레이
+    else if (MAP && MAP.hasLayer(FOUND)) MAP.removeLayer(FOUND);
+  } catch (e) {}
+  FOUND = null;
+}
+function showFoundPin(n, label){
+  clearFound();
+  if (ENGINE === "kakao" && KREADY){
+    FOUND = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(NODES[n].lat, NODES[n].lon),
+      content: '<div class="findpin" title="' + esc(label || "") + '"></div>',
+      yAnchor: 0.5, xAnchor: 0.5
+    });
+    FOUND.setMap(KMAP);
+  } else if (MAP){
+    FOUND = L.marker([NODES[n].lat, NODES[n].lon], {
+      icon: L.divIcon({className: "", html: '<div class="findpin"></div>',
+                       iconSize: [14, 14], iconAnchor: [7, 7]})
+    }).addTo(MAP);
+  }
+  /* 찍은 자리에 바로 메뉴를 띄워 출발/도착을 고르게 한다 */
+  var px, py;
+  if (ENGINE === "kakao" && KREADY){ var q = kLL(NODES[n].lat, NODES[n].lon); px = q.x; py = q.y; }
+  else { var q2 = MAP.latLngToContainerPoint([NODES[n].lat, NODES[n].lon]); px = q2.x; py = q2.y; }
+  showCtx(px, py, n);
+}
+
 function searchPlace(){
   var q = $("q").value.trim();
   if (!q) return;
@@ -970,8 +1088,8 @@ function searchPlace(){
         b2.textContent = h.display_name.split(",").slice(0, 3).join(", ");
         b2.onclick = function(){
           var n = nearestNodeLL(+h.lat, +h.lon);
-          MAP.setView(ll(n), 16);
-          if (G && (G.phase === "pickStart" || G.phase === "pickGoal")) onPick(n);
+          gotoNode(n);
+          showFoundPin(n, b2.textContent);
         };
         $("results").appendChild(b2);
       });
@@ -1873,13 +1991,36 @@ function pickRandom(){
    방향 선택은 갈림길 번호 마커를 직접 누른다. */
 
 function onPick(n){
-  if (G.phase === "pickStart"){
-    G.start = n; G.phase = "pickGoal";
-    $("hint").innerHTML = "이제 <b>도착 지점</b>을 누르세요";
-    G.cur = n; refresh(); return;
+  setPoint(n, (G.phase === "pickStart") ? "start" : "goal");
+}
+
+/* 출발/도착을 순서와 무관하게 정한다. 우클릭 메뉴와 검색 결과가 이걸 쓴다. */
+function setPoint(n, which){
+  if (!G || FB.mode === "guest") return;
+  if (G.phase !== "pickStart" && G.phase !== "pickGoal") return;
+  if (which === "start"){
+    G.start = n; G.cur = n;
+    if (G.goal == null){
+      G.phase = "pickGoal";
+      $("hint").classList.remove("hidden");
+      $("hint").innerHTML = "이제 <b>도착 지점</b>을 누르세요";
+    }
+  } else {
+    G.goal = n;
+    if (G.start == null){
+      G.phase = "pickStart";
+      $("hint").classList.remove("hidden");
+      $("hint").innerHTML = "이제 <b>출발 지점</b>을 누르세요";
+    }
   }
-  if (n === G.start){ log("출발과 도착이 같습니다"); return; }
-  G.goal = n;
+  refresh();
+  if (G.start == null || G.goal == null) return;
+  if (G.start === G.goal){ log("출발과 도착이 같습니다"); G.goal = null; refresh(); return; }
+  beginRoute();
+}
+
+function beginRoute(){
+  var n = G.goal;
   var d = shortestFrom(n);
   if (!isFinite(d[G.start])){ log("두 지점이 이어져 있지 않습니다"); G.goal = null; return; }
   G.dist = d;
@@ -2256,6 +2397,13 @@ $("extBtn").onclick = function(){
   refresh();
 };
 initMap();
+Array.prototype.forEach.call(document.querySelectorAll("#ctxMenu button"), function(b){
+  b.onclick = function(){
+    var k = b.dataset.k;
+    if (k !== "close" && CTX.node != null) setPoint(CTX.node, k);
+    hideCtx();
+  };
+});
 $("showNet").checked = SHOW_NET;
 $("showNet").onchange = function(){
   SHOW_NET = $("showNet").checked;
