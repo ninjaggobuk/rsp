@@ -638,6 +638,32 @@ function setProvider(key){
   try { localStorage.setItem("rsp.provider", key); } catch (e) {}
 }
 
+/* 보행망 표시(SHOW_NET)를 꺼도 시야 맞추기와 검색 범위는 그대로여야 한다.
+   빈 폴리라인의 getBounds() 는 예외를 던지므로 노드 좌표에서 직접 구한다. */
+/* 최상위 배선 도중 예외가 하나 나면 그 뒤 배선이 통째로 안 걸린다.
+   2026-09-17 에 빈 폴리라인 getBounds() 예외로 검색·보행망·우클릭이
+   조용히 죽었다. 다시는 소리 없이 넘어가지 않게 화면에 띄운다. */
+window.addEventListener("error", function(ev){
+  var el = document.getElementById("mapErr");
+  if (el) el.textContent = "내부 오류: " + (ev.message || ev.error);
+});
+
+var GB = null;
+function graphBounds(){
+  if (!GB){
+    var mnLat = 90, mxLat = -90, mnLon = 180, mxLon = -180;
+    for (var i = 0; i < NODES.length; i++){
+      var q = NODES[i];
+      if (q.lat < mnLat) mnLat = q.lat;
+      if (q.lat > mxLat) mxLat = q.lat;
+      if (q.lon < mnLon) mnLon = q.lon;
+      if (q.lon > mxLon) mxLon = q.lon;
+    }
+    GB = L.latLngBounds([mnLat, mnLon], [mxLat, mxLon]);
+  }
+  return GB;
+}
+
 function initMap(){
   MAP = L.map("map", {preferCanvas: true, zoomControl: true});
   var saved = "osm";
@@ -680,7 +706,7 @@ function initMap(){
   function refit(){
     MAP.invalidateSize(false);
     if (G && G.trail && G.trail.length) return;      // 게임 중이면 시야를 건드리지 않는다
-    MAP.fitBounds(GRAPH_LINE.getBounds(), {padding: [20, 20]});
+    MAP.fitBounds(graphBounds(), {padding: [20, 20]});
   }
   refit();
   setTimeout(refit, 60);
@@ -1067,7 +1093,7 @@ function showFoundPin(n, label){
 function searchPlace(){
   var q = $("q").value.trim();
   if (!q) return;
-  var b = GRAPH_LINE.getBounds();
+  var b = graphBounds();
   var box = [b.getWest(), b.getNorth(), b.getEast(), b.getSouth()].join(",");
   var url = "https://nominatim.openstreetmap.org/search?format=json&limit=6&bounded=1"
           + "&viewbox=" + box + "&q=" + encodeURIComponent(q);
@@ -1957,7 +1983,7 @@ function begin(){
   G.hands = {};
   $("log").innerHTML = "";
   $("setupPanel").classList.add("hidden");
-  if (MAP && GRAPH_LINE) MAP.fitBounds(GRAPH_LINE.getBounds());
+  if (MAP) MAP.fitBounds(graphBounds());
   $("hint").classList.remove("hidden");
   $("hint").innerHTML = "지도에서 <b>출발 지점</b>을 누르세요";
   setPanel("지점 선택", '<p class="note">출발과 도착을 차례로 누르세요. 도보 25~30분 거리가 권장 범위입니다.</p>');
