@@ -237,14 +237,20 @@ select{
     <div>
       <div class="panel" id="setupPanel"><div class="pad">
         <h2>로비 <span class="mine" id="roomCode"></span></h2>
-        <div class="searchbar" style="margin-bottom:10px">
-          <button class="primary" id="mkRoom">방 만들기</button>
-          <input type="text" id="roomIn" maxlength="4" placeholder="코드" style="flex:0 0 78px;
-            text-transform:uppercase; font-family:'IBM Plex Mono',monospace; text-align:center;
+        <div class="searchbar" style="margin-bottom:6px">
+          <input type="text" id="roomIn" maxlength="4" placeholder="방 코드 4자리"
+            style="flex:1 1 110px; text-transform:uppercase; letter-spacing:.12em;
+            font-family:'IBM Plex Mono',monospace; text-align:center;
             font:inherit; padding:7px 8px; border:1px solid var(--hair); border-radius:7px;
             background:var(--surface); color:var(--ink)">
           <button id="joinRoom">참가</button>
         </div>
+        <div class="searchbar" style="margin-bottom:10px">
+          <button class="primary" id="mkRoom" style="flex:1">방 만들기</button>
+          <button id="copyLink" disabled>초대 링크 복사</button>
+        </div>
+        <p class="note" id="roomHint" style="margin-top:0">코드를 적고 <b>참가</b>를 누르면 그 방에 들어갑니다.
+          비워두고 <b>방 만들기</b>를 누르면 코드가 자동으로 생기고, 적어두면 그 코드로 만듭니다.</p>
         <label style="margin-bottom:9px">내 닉네임
           <input type="text" id="nick" maxlength="12" placeholder="나" style="flex:0 0 130px;
             font:inherit; padding:5px 8px; border:1px solid var(--hair); border-radius:6px;
@@ -1419,10 +1425,44 @@ function updateRoomUI(){
   if (ro) roomMsg("방장이 아이템과 지점을 정합니다. 시작하면 화면이 따라옵니다.");
 }
 
+function setRoomLink(){
+  if (!FB.room) return;
+  var url = location.origin + location.pathname + "?room=" + FB.room;
+  try { history.replaceState(null, "", url); } catch (e) {}
+  var b = $("copyLink");
+  b.disabled = false;
+  b.onclick = function(){
+    function done(){ b.textContent = "복사됨"; setTimeout(function(){ b.textContent = "초대 링크 복사"; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(url).then(done, function(){ prompt("이 링크를 복사하세요", url); });
+    } else {
+      prompt("이 링크를 복사하세요", url);
+    }
+  };
+}
+
+/* ?room=XXXX 로 들어오면 코드를 채우고 바로 참가한다.
+   링크에 코드가 없으면 상대는 빈 화면을 받는다(2026-09-17 사장님 지적). */
+function autoJoinFromURL(){
+  var m = /[?&]room=([A-Za-z0-9]{4})/.exec(location.search);
+  if (!m || !fbEnabled()) return;
+  $("roomIn").value = m[1].toUpperCase();
+  roomMsg("초대 링크로 방 " + m[1].toUpperCase() + " 에 들어가는 중…");
+  setTimeout(joinRoom, 400);
+}
+
 function createRoom(){
+  var want = ($("roomIn").value || "").trim().toUpperCase();
+  if (want && !/^[A-Z0-9]{4}$/.test(want)){
+    roomMsg("방 코드는 영문/숫자 4자리입니다.", true); return;
+  }
   roomMsg("방 만드는 중…");
   fbConnect().then(function(){
-    var code = roomCode();
+    if (!want) return null;
+    return FB.db.ref("rooms/" + want + "/meta").once("value");
+  }).then(function(sn){
+    if (sn && sn.exists()) throw new Error("이미 쓰고 있는 코드입니다 — 참가를 누르세요");
+    var code = want || roomCode();
     FB.room = code;
     FB.ref = FB.db.ref("rooms/" + code);
     FB.host = FB.uid;
@@ -1442,7 +1482,8 @@ function createRoom(){
     return writePlayers();
   }).then(function(){
     subscribeRoom();
-    roomMsg("방 " + FB.room + " 개설. 이 코드를 팀원에게 알려주세요.");
+    setRoomLink();
+    roomMsg("방 " + FB.room + " 개설. 아래 '초대 링크 복사'로 팀원에게 보내세요.");
   }).catch(function(e){
     roomMsg("방 개설 실패: " + (e && e.message ? e.message : e), true);
   });
@@ -1466,6 +1507,7 @@ function joinRoom(){
     FB.mode = "guest";
     NET.setMode("guest");
     subscribeRoom();
+    setRoomLink();
     roomMsg("방 " + FB.room + " 참가.");
   }).catch(function(e){
     roomMsg("참가 실패: " + (e && e.message ? e.message : e), true);
@@ -2100,6 +2142,7 @@ Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
 });
 initLobby();
 $("mkRoom").onclick = createRoom;
+setTimeout(autoJoinFromURL, 300);
 $("joinRoom").onclick = joinRoom;
 ["iReE","iReS","iWinE","iWinS","iSkE","iSkS","voteRule"].forEach(function(id){
   $(id).addEventListener("change", function(){ addBotSync(); pushSetup(); });
