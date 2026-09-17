@@ -244,6 +244,9 @@ select{
     <div>
       <div class="panel" id="setupPanel"><div class="pad">
         <h2>로비 <span class="mine" id="roomCode"></span></h2>
+        <div class="btnrow" style="margin-bottom:8px">
+          <button class="primary hidden" id="claimHost">방장이 없습니다 — 내가 맡기</button>
+        </div>
         <div class="searchbar" style="margin-bottom:6px">
           <input type="text" id="roomIn" maxlength="4" placeholder="방 코드 4자리"
             style="flex:1 1 110px; text-transform:uppercase; letter-spacing:.12em;
@@ -1150,6 +1153,7 @@ function renderLobby(){
   if (offN) w.push(offN + "명이 접속이 끊긴 채 남아 있습니다 — 방장이 정리할 수 있습니다.");
   $("lobbyWarn").textContent = w.join(" ");
 
+  if (FB.mode !== "local") updateRoomUI();
   var bad = !e || !s;
   $("startBtn").disabled = bad;
   $("randBtn").disabled = bad;
@@ -1428,11 +1432,41 @@ function subscribeRoom(){
   updateRoomUI();
 }
 
+/* 방장이 나가버린 방은 아무도 시작할 수 없다. 누가 방장인지 보여주고,
+   방장이 없으면 남은 사람이 이어받을 수 있게 한다(2026-09-17 사장님 지적:
+   "이 주소로 들어가면 방장은 누구인 거임?"). */
+function hostInfo(){
+  if (FB.mode === "local") return {name: "나", alive: true};
+  var h = PLAYERS.filter(function(p){ return p.id === FB.host; })[0];
+  if (!h) return {name: null, alive: false};
+  return {name: h.name, alive: !h.off};
+}
+
+function claimHost(){
+  if (!FB.ref) return;
+  roomMsg("방장 이어받는 중…");
+  FB.ref.child("meta/host").set(FB.uid).then(function(){
+    FB.host = FB.uid;
+    FB.mode = "host";
+    NET.setMode("host");
+    watchIntents();
+    updateRoomUI();
+    renderLobby();
+    roomMsg("이제 사장님이 방장입니다. 지점을 고르고 시작하세요.");
+  }).catch(function(e){
+    roomMsg("이어받기 실패: " + (e && e.message ? e.message : e)
+            + " — Firebase 규칙을 최신으로 올렸는지 확인하세요.", true);
+  });
+}
+
 function updateRoomUI(){
   var on = FB.mode !== "local";
+  var hi = hostInfo();
   $("netTag").textContent = on
-    ? ("방 " + FB.room + " · " + (FB.mode === "host" ? "방장" : "참가자"))
+    ? ("방 " + FB.room + " · " + (FB.mode === "host" ? "내가 방장" : "방장 " + (hi.name || "없음")))
     : (fbEnabled() ? "로컬 (방 미개설)" : "로컬");
+  var cb = $("claimHost");
+  if (cb) cb.classList.toggle("hidden", !(on && FB.mode === "guest" && !hi.alive));
   $("roomCode").textContent = on ? FB.room : "";
   $("mkRoom").disabled = on;
   $("joinRoom").disabled = on;
@@ -2171,6 +2205,7 @@ Array.prototype.forEach.call(document.querySelectorAll(".addbot"), function(b){
   b.onclick = function(){ addBot(b.dataset.team); renderLobby(); };
 });
 initLobby();
+$("claimHost").onclick = claimHost;
 $("cleanOff").onclick = function(){
   PLAYERS = PLAYERS.filter(function(p){ return !p.off; });
   renderLobby();

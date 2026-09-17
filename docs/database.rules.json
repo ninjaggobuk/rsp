@@ -5,7 +5,7 @@
         ".read": "auth != null",
 
         "meta": {
-          ".write": "auth != null && (!data.exists() || data.child('host').val() === auth.uid)",
+          ".write": "auth != null && (!data.exists() || data.child('host').val() === auth.uid || !root.child('rooms/'+$room+'/players/'+data.child('host').val()).exists() || root.child('rooms/'+$room+'/players/'+data.child('host').val()+'/online').val() === false)",
           ".validate": "newData.hasChildren(['host'])"
         },
 
