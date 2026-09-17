@@ -217,6 +217,10 @@ select{
           <input type="text" id="q" placeholder="장소 검색 — 예: 서울과학기술대학교, 공릉역">
           <button id="searchBtn">검색</button>
           <select id="provider" aria-label="지도 종류"></select>
+          <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);
+                        white-space:nowrap;padding:0">
+            <input type="checkbox" id="showNet" style="width:auto;margin:0"> 보행망
+          </label>
         </div>
         <div id="results"></div>
       </div></div>
@@ -568,6 +572,12 @@ function freshGame(cfg){
    바꾸는 걸로는 안 되고, 사장님 계정으로 발급한 키가 있어야 붙일 수 있다. */
 var MAP = null, GRAPH_LINE = null, TRAIL_LINE = null, TILE = null;
 var MARKS = null, OPTS = null, ROAD_COLOR = null;
+/* 교차로를 병합하면 OSMnx 가 엣지 끝을 합쳐진 중심점으로 다시 이어붙인다.
+   그래서 큰 교차로마다 실제로는 없는 '바퀴살'이 생긴다(2026-09-17 사장님 지적).
+   원본 도로 모양을 실으면 929 KB 라 무겁고, 실제 지도 위에서는 도로가 이미
+   보이므로 기본으로 끈다. 게임에 필요한 현재 위치·목적지·선택지·지나온 길은
+   따로 그린다. */
+var SHOW_NET = false;
 /* 실제 지도 타일 위에서는 얇은 회색 선이 배경에 묻힌다(2026-09-17 실측:
    33,669 px 이 그려졌는데도 눈에 안 보였다). 타일 위에서는 전용 색을 쓴다. */
 var ROAD_ON_TILE = "#1565C0";      /* 진한 파랑 — 도로·건물색과 안 겹친다 */
@@ -646,7 +656,7 @@ function initMap(){
 
   /* 보행망 전체를 한 겹으로. 엣지마다 레이어를 만들면 1357개라 느려진다. */
   var segs = EGEO.map(function(g){ return g.pts; });
-  GRAPH_LINE = L.polyline(segs, {
+  GRAPH_LINE = L.polyline(SHOW_NET ? segs : [], {
     color: roadColor(), weight: 2.4, opacity: 0.6, interactive: false
   }).addTo(MAP);
 
@@ -719,6 +729,7 @@ function draw(){
   TRAIL_LINE.setLatLngs(tr);
   TRAIL_LINE.setStyle({color: cssVar("--exp")});
   GRAPH_LINE.setStyle({color: roadColor()});
+  GRAPH_LINE.setLatLngs(SHOW_NET ? EGEO.map(function(g){ return g.pts; }) : []);
 
   MARKS.clearLayers();
   if (G.goal != null) pin(G.goal, cssVar("--sha"), "도착").addTo(MARKS);
@@ -833,6 +844,7 @@ function kDraw(){
   KCX.lineJoin = "round";
   KCX.globalAlpha = 0.6;
   /* 좌표점이 1만 개라 화면 밖 엣지는 bbox 로 먼저 걸러낸다 */
+  if (!SHOW_NET) { KCX.globalAlpha = 1; } else {
   var vb = KMAP.getBounds();
   var sw = vb.getSouthWest(), ne = vb.getNorthEast();
   var mnLat = sw.getLat(), mnLon = sw.getLng(), mxLat = ne.getLat(), mxLon = ne.getLng();
@@ -850,6 +862,7 @@ function kDraw(){
   }
   KCX.stroke();
   KCX.globalAlpha = 1;
+  }
 
   if (!G) return;
 
@@ -1392,6 +1405,10 @@ function writePlayers(){
 }
 
 function subscribeRoom(){
+  /* 자동 참가와 수동 참가가 겹치면 리스너가 두 번 붙어 채팅이 2~3개씩
+     보였다(2026-09-17 사장님 지적). 방마다 한 번만 건다. */
+  if (FB.subscribed === FB.room) return;
+  FB.subscribed = FB.room;
   FB.ref.child("players").on("value", function(sn){
     var v = sn.val() || {};
     FB.serverIds = Object.keys(v);
@@ -1406,6 +1423,8 @@ function subscribeRoom(){
   watchIntents();
   ["all", "exp", "sha"].forEach(function(sc){
     FB.ref.child("chat/" + sc).limitToLast(50).on("child_added", function(sn){
+      if (SEEN[sn.key]) return;          /* 두 번째로 온 같은 메시지는 버린다 */
+      SEEN[sn.key] = 1;
       var m = sn.val() || {};
       m.scope = sc;
       CHAT[sc].push(m);
@@ -1576,6 +1595,7 @@ function lobbyChanged(who){
 
 /* ---------- 채팅 ---------- */
 var CHAT = {all: [], exp: [], sha: []};
+var SEEN = {};   /* 메시지 키 -> 이미 그렸음 */
 var CHAT_TAB = "all";
 
 NET.on("chat", function(m){
@@ -2229,6 +2249,12 @@ $("extBtn").onclick = function(){
   refresh();
 };
 initMap();
+$("showNet").checked = SHOW_NET;
+$("showNet").onchange = function(){
+  SHOW_NET = $("showNet").checked;
+  if (ENGINE === "kakao") kDraw();
+  else if (GRAPH_LINE) GRAPH_LINE.setLatLngs(SHOW_NET ? EGEO.map(function(g){ return g.pts; }) : []);
+};
 $("searchBtn").onclick = searchPlace;
 $("q").addEventListener("keydown", function(e){ if (e.key === "Enter") searchPlace(); });
 setPanel("시작하기", '<p class="note">오른쪽에서 인원과 아이템을 정한 뒤 <b>지점 고르기</b>를 누르세요. 기본값 4:2 · 아이템 없음이 공릉 24개 루트에서 중앙값 52.5%로 가장 균형 잡힌 구성입니다.</p>');
