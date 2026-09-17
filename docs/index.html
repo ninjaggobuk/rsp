@@ -1941,6 +1941,7 @@ function startRps(){
   var n = G.roster.length;
   G.alive = []; for (var i = 0; i < n; i++) G.alive.push(i);
   G.round = 0; G.hands = {}; G.phase = "rps";
+  if (G.autoT){ clearTimeout(G.autoT); G.autoT = null; }
   rpsPrompt();
 }
 
@@ -1994,9 +1995,15 @@ function rpsPrompt(){
       b.onclick = function(){ NET.send("hand", {i: who, v: +b.dataset.h}); };
     });
   } else {
-    html += '<div class="btnrow"><button class="primary" id="nextR">결과 보기</button></div>';
+    /* 사람 손이 다 모였으면 자동으로 판정한다. 버튼을 두면 방장이 매 라운드
+       눌러야 하고(한 판에 150번쯤 된다) 참가자 화면은 그동안 멈춰 있어서
+       "가위바위보가 진행이 안 된다"로 보인다(2026-09-17 사장님 지적).
+       봇 손은 resolveRound 가 채운다. */
+    html += '<p class="note">판정 중…</p>';
     setPanel("가위바위보", html);
-    $("nextR").onclick = resolveRound;
+    if (!G.autoT){
+      G.autoT = setTimeout(function(){ G.autoT = null; resolveRound(); }, 700);
+    }
   }
   refresh();
 }
@@ -2013,6 +2020,7 @@ function renderThrows(){
 }
 
 function resolveRound(){
+  if (G.autoT){ clearTimeout(G.autoT); G.autoT = null; }
   G.round++;
   G.t += SEC_PER_ROUND / 60;
   var ts = G.alive.map(function(i){
